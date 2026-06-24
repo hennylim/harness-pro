@@ -16,13 +16,27 @@ class AIProvider(str, Enum):
     GEMINI = "GEMINI"
 
 
-# Gemini 기본 모델 (모델명이 자주 갱신되므로 상수로 분리)
+class TargetLanguage(str, Enum):
+    """
+    코드 생성 대상 언어.
+
+    새 언어 추가 시 이 Enum 에 값을 추가하고,
+    agent/domain/profiles/ 와 agent/infrastructure/sensors/ 에 각각
+    프로필 / 센서 파일을 작성한 뒤 registry / router 에 등록한다.
+    """
+    PYTHON = "python"
+    BASH   = "bash"
+    C      = "c"
+    CPP    = "cpp"
+
+
+# 제공자별 기본 모델 (자주 변경되므로 상수로 분리)
 GEMINI_DEFAULT_MODEL = "gemini-2.5-flash-preview-05-20"
 
 
 class LintBackend(str, Enum):
     FLAKE8 = "flake8"
-    RUFF = "ruff"
+    RUFF   = "ruff"
 
 
 class Settings(BaseSettings):
@@ -44,9 +58,10 @@ class Settings(BaseSettings):
     ai_max_retries: int = Field(default=3, ge=1, le=10)
 
     # ── Gemini 전용 ───────────────────────────────────────────────────────────
-    # AI_PROVIDER=GEMINI 일 때 AI_API_KEY 대신 이 값을 사용해도 됩니다.
-    # 둘 다 설정된 경우 GEMINI_API_KEY 가 우선합니다.
     gemini_api_key: Optional[str] = None
+
+    # ── 대상 언어 ─────────────────────────────────────────────────────────────
+    target_language: TargetLanguage = TargetLanguage.PYTHON
 
     # ── Agent behaviour ───────────────────────────────────────────────────────
     dry_run: bool = True
@@ -54,14 +69,14 @@ class Settings(BaseSettings):
     max_self_heal_attempts: int = Field(default=3, ge=1, le=10)
     max_tasks_per_run: int = Field(default=50, ge=1)
 
-    # ── Code quality ──────────────────────────────────────────────────────────
+    # ── Code quality (Python 전용 – 다른 언어는 센서가 자체 설정 보유) ────────
     lint_backend: LintBackend = LintBackend.RUFF
     lint_ignore_codes: str = "E501,W292,W391"
 
     # ── Observability ─────────────────────────────────────────────────────────
     log_level: str = "INFO"
-    log_format: str = "json"          # "json" | "console"
-    run_id: Optional[str] = None      # injected at runtime if not set
+    log_format: str = "json"
+    run_id: Optional[str] = None
 
     # ── Notifications (optional) ──────────────────────────────────────────────
     slack_webhook_url: Optional[str] = None
@@ -80,17 +95,11 @@ class Settings(BaseSettings):
     @field_validator("log_format")
     @classmethod
     def _validate_log_format(cls, v: str) -> str:
-        allowed = {"json", "console"}
-        if v not in allowed:
-            raise ValueError(f"log_format must be one of {allowed}")
+        if v not in {"json", "console"}:
+            raise ValueError("log_format must be 'json' or 'console'")
         return v
 
     def effective_gemini_api_key(self) -> str:
-        """
-        Gemini API 키를 반환합니다.
-        우선순위: GEMINI_API_KEY > AI_API_KEY
-        키가 없으면 ValueError를 발생시켜 시작 전에 실패합니다.
-        """
         key = self.gemini_api_key or (
             self.ai_api_key if self.ai_api_key not in ("ollama", "") else None
         )
@@ -102,5 +111,4 @@ class Settings(BaseSettings):
         return key
 
 
-# Singleton – imported everywhere else
 settings = Settings()

@@ -62,8 +62,18 @@ class IFileSystemAdapter(ABC):
         """Delete a file from the workspace."""
 
     @abstractmethod
-    def get_workspace_skeleton(self) -> str:
-        """Return a compact text representation of existing workspace files."""
+    def get_workspace_skeleton(
+        self,
+        accepted_extensions: frozenset | None = None,
+    ) -> str:
+        """Return a compact text representation of existing workspace files.
+
+        Parameters
+        ----------
+        accepted_extensions:
+            파일 확장자 필터 (점 포함, 소문자).
+            None 이면 구현체 기본값(보통 .py)을 사용한다.
+        """
 
     @abstractmethod
     def backup_file(self, relative_path: str) -> Optional[str]:

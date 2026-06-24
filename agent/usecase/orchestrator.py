@@ -29,6 +29,7 @@ from agent.domain.exceptions import (
     PlanValidationError,
     TaskLimitExceededError,
 )
+from agent.domain.language_profile import ILanguageProfile
 from agent.domain.interfaces import (
     IFileSystemAdapter,
     ILLMAdapter,
@@ -72,6 +73,7 @@ class HarnessOrchestrator:
         run_repo: IRunRepository,
         run_id: str,
         notifier: Optional[INotificationAdapter] = None,
+        language_profile: Optional[ILanguageProfile] = None,
         dry_run: bool = False,
         max_self_heal: int = 3,
         max_tasks: int = 50,
@@ -81,6 +83,7 @@ class HarnessOrchestrator:
         self._sensor = sensor
         self._repo = run_repo
         self._notifier = notifier
+        self._language_profile = language_profile
         self._dry_run = dry_run
         self._max_self_heal = max_self_heal
         self._max_tasks = max_tasks
@@ -205,7 +208,12 @@ class HarnessOrchestrator:
             task_log.debug("agent.task.backup_created", backup=backup_path)
 
         for attempt in range(1, self._max_self_heal + 1):
-            skeleton = self._fs.get_workspace_skeleton()
+            skeleton = self._fs.get_workspace_skeleton(
+                accepted_extensions=(
+                    self._language_profile.skeleton_extensions
+                    if self._language_profile else None
+                )
+            )
             error_feedback = (
                 f"이전 오류 ({task.retry_count}회 시도):\n{task.last_error}"
                 if task.last_error

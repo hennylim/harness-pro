@@ -4,7 +4,9 @@ Harness Agent – main entry point.
 Usage
 -----
     python main.py
-    python main.py --requirements "Build a REST API with FastAPI"
+    python main.py --language bash --requirements "로그 백업 스크립트 작성"
+    python main.py --language c    --requirements "링크드 리스트 라이브러리 구현"
+    python main.py --language cpp  --requirements "스택 템플릿 클래스 구현"
     python main.py --dry-run --log-format console
 
 Environment
@@ -23,23 +25,57 @@ from rich.table import Table
 
 console = Console()
 
+# 언어별 기본 요구사항 예시 (--requirements 미지정 시 사용)
+_DEFAULT_REQUIREMENTS: dict[str, str] = {
+    "python": (
+        "src/math_tool.py 에 add, subtract, multiply, divide 함수를 구현하고, "
+        "각 함수에 대한 단위 테스트를 tests/test_math_tool.py 에 작성하고, "
+        "src/run.py 에서 모든 함수를 실행해 결과를 출력하는 CLI를 만들어줘."
+    ),
+    "bash": (
+        "scripts/backup.sh 를 작성해줘. "
+        "SOURCE_DIR 과 DEST_DIR 환경변수를 읽어 타임스탬프 디렉터리로 백업하고, "
+        "오래된 백업(30일 초과)을 자동 삭제하며 scripts/utils.sh 에 공통 로깅 함수를 분리해줘."
+    ),
+    "c": (
+        "src/linked_list.h 와 src/linked_list.c 에 단방향 링크드 리스트를 구현하고 "
+        "(push_front, push_back, pop_front, find, free_list), "
+        "src/main.c 에서 모든 함수를 테스트하는 드라이버를 작성해줘."
+    ),
+    "cpp": (
+        "include/stack.hpp 에 제네릭 Stack<T> 클래스 템플릿을 구현하고 "
+        "(push, pop, top, empty, size), "
+        "src/main.cpp 에서 int 와 std::string 타입으로 동작을 검증해줘."
+    ),
+}
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Harness – LLM-driven code-generation agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python main.py --language python\n"
+            "  python main.py --language bash   --requirements '로그 정리 스크립트'\n"
+            "  python main.py --language c      --dry-run\n"
+            "  python main.py --language cpp    --log-format console\n"
+        ),
     )
     parser.add_argument(
-        "--requirements",
-        "-r",
-        type=str,
+        "--requirements", "-r",
+        type=str, default=None,
+        help="Free-text project requirements (overrides built-in default).",
+    )
+    parser.add_argument(
+        "--language", "-l",
+        choices=["python", "bash", "c", "cpp"],
         default=None,
-        help="Free-text project requirements (overrides hard-coded default).",
+        help="Target language (overrides TARGET_LANGUAGE in .env).",
     )
     parser.add_argument(
         "--dry-run",
-        action="store_true",
-        default=None,
+        action="store_true", default=None,
         help="Preview mode: no files written, lint simulated.",
     )
     parser.add_argument(
@@ -50,29 +86,34 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--workspace",
-        type=str,
-        default=None,
+        type=str, default=None,
         help="Override the workspace directory.",
     )
     return parser.parse_args()
 
 
 def _print_summary_table(summary) -> None:
-    table = Table(title=f"Run Summary  [dim]({summary.run_id})[/dim]", show_lines=True)
+    table = Table(
+        title=f"Run Summary  [dim]({summary.run_id})[/dim]",
+        show_lines=True,
+    )
     table.add_column("Metric", style="bold")
     table.add_column("Value")
 
     status_color = {
         "completed": "green",
-        "failed": "red",
-        "aborted": "yellow",
+        "failed":    "red",
+        "aborted":   "yellow",
     }.get(summary.status.value, "white")
 
-    table.add_row("Status", f"[{status_color}]{summary.status.value.upper()}[/{status_color}]")
+    table.add_row(
+        "Status",
+        f"[{status_color}]{summary.status.value.upper()}[/{status_color}]",
+    )
     table.add_row("Total tasks", str(summary.total_tasks))
-    table.add_row("Completed", f"[green]{summary.completed_tasks}[/green]")
-    table.add_row("Failed", f"[red]{summary.failed_tasks}[/red]")
-    table.add_row("Skipped", str(summary.skipped_tasks))
+    table.add_row("Completed",   f"[green]{summary.completed_tasks}[/green]")
+    table.add_row("Failed",      f"[red]{summary.failed_tasks}[/red]")
+    table.add_row("Skipped",     str(summary.skipped_tasks))
     if summary.duration_seconds is not None:
         table.add_row("Duration", f"{summary.duration_seconds:.1f}s")
 
@@ -90,14 +131,16 @@ def _print_summary_table(summary) -> None:
 def main() -> int:
     args = _parse_args()
 
-    # ── Apply CLI overrides before importing settings ──────────────────────────
+    # ── CLI 오버라이드를 환경변수로 주입 (settings 로드 전) ─────────────────────
     import os
     if args.dry_run:
         os.environ["DRY_RUN"] = "true"
     if args.log_format:
         os.environ["LOG_FORMAT"] = args.log_format
+    if args.language:
+        os.environ["TARGET_LANGUAGE"] = args.language
 
-    # ── Configure logging (must happen before any other imports) ───────────────
+    # ── 로깅 설정 ─────────────────────────────────────────────────────────────
     from config.logging import configure_logging
     from config.settings import settings
 
@@ -107,29 +150,32 @@ def main() -> int:
         run_id=settings.run_id,
     )
 
-    # ── Build the orchestrator ─────────────────────────────────────────────────
+    # ── Orchestrator 조립 ─────────────────────────────────────────────────────
     from agent.container import build_orchestrator
     orchestrator, run_id = build_orchestrator(
         workspace_dir=args.workspace,
         run_id=run_id,
     )
 
-    # ── Default requirements ───────────────────────────────────────────────────
-    requirements = args.requirements or (
-        "src/math_tool.py 에 add, subtract, multiply, divide 함수를 구현하고, "
-        "각 함수에 대한 단위 테스트를 tests/test_math_tool.py 에 작성하고, "
-        "src/run.py 에서 모든 함수를 실행해 결과를 출력하는 CLI를 만들어줘."
+    # ── 요구사항 결정 ─────────────────────────────────────────────────────────
+    lang = settings.target_language.value
+    requirements = (
+        args.requirements
+        or _DEFAULT_REQUIREMENTS.get(lang, "주어진 요구사항을 구현해줘.")
     )
 
     console.print(
         Panel.fit(
-            f"[bold cyan]🚀 Harness Agent[/bold cyan]  [dim]run_id={run_id}[/dim]\n"
-            f"[dim]dry_run={settings.dry_run}  model={settings.ai_model}[/dim]",
+            f"[bold cyan]🚀 Harness Agent[/bold cyan]  "
+            f"[dim]run_id={run_id}[/dim]\n"
+            f"[dim]language={lang}  "
+            f"dry_run={settings.dry_run}  "
+            f"model={settings.ai_model}[/dim]",
             border_style="cyan",
         )
     )
 
-    # ── Execute ────────────────────────────────────────────────────────────────
+    # ── 실행 ─────────────────────────────────────────────────────────────────
     try:
         summary = orchestrator.execute(requirements)
     except KeyboardInterrupt:
@@ -140,7 +186,6 @@ def main() -> int:
         return 1
 
     _print_summary_table(summary)
-
     return 0 if summary.failed_tasks == 0 else 1
 
 

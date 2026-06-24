@@ -24,3 +24,8 @@ __all__ = [
     "ILLMAdapter", "IFileSystemAdapter", "ISensorAdapter",
     "INotificationAdapter", "IRunRepository",
 ]
+
+from .language_profile import ILanguageProfile
+from .profiles import PROFILE_REGISTRY
+
+__all__ += ["ILanguageProfile", "PROFILE_REGISTRY"]

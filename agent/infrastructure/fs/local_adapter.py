@@ -100,20 +100,28 @@ class LocalFileSystemAdapter(IFileSystemAdapter):
         except OSError as exc:
             raise FileSystemError(f"Failed to delete {relative_path!r}: {exc}") from exc
 
-    def get_workspace_skeleton(self) -> str:
+    def get_workspace_skeleton(
+        self,
+        accepted_extensions: frozenset | None = None,
+    ) -> str:
         """
-        Return a compact text snapshot of every Python file in the workspace
-        (first 10 lines each).  Used as context in code-generation prompts.
+        Return a compact text snapshot of workspace source files
+        (first 10 lines each). Used as context in code-generation prompts.
+
+        Parameters
+        ----------
+        accepted_extensions:
+            파일 확장자 필터 (점 포함, 소문자). None 이면 .py 만 포함 (하위 호환).
         """
+        exts = accepted_extensions or frozenset({".py"})
         lines: list[str] = []
         for root, dirs, files in os.walk(self._base):
-            # Skip backup directory and hidden directories
             dirs[:] = [
                 d for d in sorted(dirs)
                 if not d.startswith(".") and d != "__pycache__"
             ]
             for fname in sorted(files):
-                if not fname.endswith(".py"):
+                if os.path.splitext(fname)[1].lower() not in exts:
                     continue
                 full = os.path.join(root, fname)
                 rel = os.path.relpath(full, self._base)

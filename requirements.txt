@@ -4,7 +4,10 @@ pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
 
-# Linting & Code Quality
+# Gemini provider
+google-genai>=2.9.0
+
+# Linting & Code Quality (Python)
 flake8>=6.0.0
 ruff>=0.4.0
 
@@ -22,3 +25,8 @@ pytest-mock>=3.12.0
 
 # Type Checking
 mypy>=1.9.0
+
+# ── System tools (pip 외 별도 설치 필요) ──────────────────────────────────────
+# Bash  : shellcheck  →  apt install shellcheck  /  brew install shellcheck
+# C/C++ : gcc, g++    →  apt install build-essential
+# C/C++ : clang-tidy  →  apt install clang-tidy  /  brew install llvm
