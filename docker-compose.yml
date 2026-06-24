@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  harness:
+    build: .
+    env_file: .env
+    volumes:
+      - ./sandbox_workspace:/app/sandbox_workspace
+      - ./runs:/app/runs
+    restart: "no"
+
+  # Local Ollama (optional – remove if using OpenAI / cloud providers)
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles:
+      - ollama
+
+volumes:
+  ollama_data:
