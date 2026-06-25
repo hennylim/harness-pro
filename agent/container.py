@@ -23,12 +23,15 @@ from agent.domain.profiles import PROFILE_REGISTRY
 from agent.infrastructure.fs.local_adapter import LocalFileSystemAdapter
 from agent.infrastructure.fs.run_repository import JsonRunRepository
 from agent.infrastructure.llm.gemini_adapter import GeminiAdapter
+from agent.infrastructure.llm.openai_adapter import JsonMode
 from agent.infrastructure.llm.openai_adapter import OpenAICompatibleAdapter
 from agent.infrastructure.llm.prompt_builder import PromptBuilder
 from agent.infrastructure.notification.slack_adapter import (
     NullNotificationAdapter,
     SlackWebhookAdapter,
 )
+from agent.infrastructure.llm.post_processor import CodePostProcessor
+from agent.infrastructure.validators import VALIDATOR_REGISTRY
 from agent.infrastructure.sensors.router import LanguageSensorRouter
 from agent.usecase.orchestrator import HarnessOrchestrator
 from config.settings import AIProvider, GEMINI_DEFAULT_MODEL, settings
@@ -81,6 +84,7 @@ def _build_llm_adapter(prompt_builder: PromptBuilder) -> ILLMAdapter:
         base_url=settings.ai_base_url,
         api_key=settings.ai_api_key,
         prompt_builder=prompt_builder,
+        json_mode=JsonMode(settings.ai_json_mode.value),
         temperature=settings.ai_temperature,
         max_tokens=settings.ai_max_tokens,
         timeout_seconds=settings.ai_timeout_seconds,
@@ -114,7 +118,16 @@ def build_orchestrator(
     llm    = _build_llm_adapter(prompt_builder)
     fs     = LocalFileSystemAdapter(workspace_dir=ws)
     sensor = LanguageSensorRouter()       # 확장자 기반 자동 라우팅
+    post_processor = CodePostProcessor(
+        fix_trailing_whitespace=settings.post_process_trailing_whitespace,
+        fix_unused_imports=settings.post_process_unused_imports,
+        detect_truncation=settings.post_process_detect_truncation,
+    )
     run_repo = JsonRunRepository(runs_dir=runs_dir)
+
+    # ── Execution validator ────────────────────────────────────────────────
+    lang_key = settings.target_language.value
+    execution_validator = VALIDATOR_REGISTRY.get(lang_key)
 
     notifier: INotificationAdapter
     if settings.slack_webhook_url and (
@@ -133,6 +146,10 @@ def build_orchestrator(
         run_id=run_id,
         notifier=notifier,
         language_profile=prompt_builder._profile,
+        post_processor=post_processor,
+        execution_validator=execution_validator,
+        enable_build_validation=settings.enable_build_validation,
+        enable_execution_validation=settings.enable_execution_validation,
         dry_run=settings.dry_run,
         max_self_heal=settings.max_self_heal_attempts,
         max_tasks=settings.max_tasks_per_run,

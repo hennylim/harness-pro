@@ -34,6 +34,20 @@ class TargetLanguage(str, Enum):
 GEMINI_DEFAULT_MODEL = "gemini-2.5-flash-preview-05-20"
 
 
+class JsonMode(str, Enum):
+    """
+    OpenAI 호환 서버의 JSON 출력 모드.
+    AUTO: 첫 호출 시 서버를 탐색해 자동 결정 (권장).
+    json_object : OpenAI 표준. Ollama 최신 버전 지원.
+    json_schema : LM Studio, 일부 로컬 서버.
+    plain_prompt: response_format 없이 프롬프트만으로 강제.
+    """
+    AUTO         = "auto"
+    JSON_OBJECT  = "json_object"
+    JSON_SCHEMA  = "json_schema"
+    PLAIN_PROMPT = "plain_prompt"
+
+
 class LintBackend(str, Enum):
     FLAKE8 = "flake8"
     RUFF   = "ruff"
@@ -57,6 +71,11 @@ class Settings(BaseSettings):
     ai_timeout_seconds: int = Field(default=120, ge=10)
     ai_max_retries: int = Field(default=3, ge=1, le=10)
 
+    # ── OpenAI 호환 서버 JSON 모드 ──────────────────────────────────────────────
+    # AUTO: 첫 호출 시 서버 능력을 탐색해 자동 결정 (권장)
+    # 수동 지정: json_object | json_schema | plain_prompt
+    ai_json_mode: JsonMode = JsonMode.AUTO
+
     # ── Gemini 전용 ───────────────────────────────────────────────────────────
     gemini_api_key: Optional[str] = None
 
@@ -68,6 +87,19 @@ class Settings(BaseSettings):
     workspace_dir: str = "./sandbox_workspace"
     max_self_heal_attempts: int = Field(default=3, ge=1, le=10)
     max_tasks_per_run: int = Field(default=50, ge=1)
+
+    # ── Build & execution validation ─────────────────────────────────────────
+    # 모든 태스크 완료 후 빌드 및 실행 검증을 수행하는 옵션
+    enable_build_validation: bool = True    # 빌드(컴파일/문법검사) 수행
+    enable_execution_validation: bool = True  # 실행(smoke-test) 수행
+    build_timeout_seconds: int = Field(default=60, ge=10)
+    run_timeout_seconds: int = Field(default=30, ge=5)
+
+    # ── Code post-processing ──────────────────────────────────────────────────
+    # 생성된 코드를 디스크 저장 전에 자동 수정하는 옵션
+    post_process_trailing_whitespace: bool = True   # W291/W293 자동 제거
+    post_process_unused_imports: bool = True        # F401 자동 제거
+    post_process_detect_truncation: bool = True     # 코드 잘림 감지 후 재시도
 
     # ── Code quality (Python 전용 – 다른 언어는 센서가 자체 설정 보유) ────────
     lint_backend: LintBackend = LintBackend.RUFF

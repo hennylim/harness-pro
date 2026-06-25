@@ -148,6 +148,31 @@ class LintResult(BaseModel):
         return "\n".join(self.errors)
 
 
+class BuildResult(BaseModel):
+    """Outcome of a build/compile step."""
+
+    passed: bool
+    errors: List[str] = Field(default_factory=list)
+    stdout: str = ""
+    stderr: str = ""
+    tool: str = "unknown"
+
+    @property
+    def error_summary(self) -> str:
+        return "\n".join(self.errors) if self.errors else self.stderr[:500]
+
+
+class ExecutionResult(BaseModel):
+    """Outcome of running the generated program."""
+
+    passed: bool
+    exit_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    command: str = ""
+    error_summary: str = ""
+
+
 class RunSummary(BaseModel):
     """Persisted record of a complete agent run."""
 
@@ -159,6 +184,8 @@ class RunSummary(BaseModel):
     completed_tasks: int = 0
     failed_tasks: int = 0
     skipped_tasks: int = 0
+    build_passed: Optional[bool] = None
+    execution_passed: Optional[bool] = None
     tasks: List[Task] = Field(default_factory=list)
 
     def finish(self, status: RunStatus) -> None:

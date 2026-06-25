@@ -114,6 +114,16 @@ def _print_summary_table(summary) -> None:
     table.add_row("Completed",   f"[green]{summary.completed_tasks}[/green]")
     table.add_row("Failed",      f"[red]{summary.failed_tasks}[/red]")
     table.add_row("Skipped",     str(summary.skipped_tasks))
+
+    def _verdict(val: bool | None) -> str:
+        if val is True:
+            return "[green]PASS[/green]"
+        if val is False:
+            return "[red]FAIL[/red]"
+        return "[dim]SKIP[/dim]"
+
+    table.add_row("Build",      _verdict(summary.build_passed))
+    table.add_row("Execution",  _verdict(summary.execution_passed))
     if summary.duration_seconds is not None:
         table.add_row("Duration", f"{summary.duration_seconds:.1f}s")
 

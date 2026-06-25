@@ -54,3 +54,13 @@ class MaxRetriesExceededError(HarnessError):
 
 class TaskLimitExceededError(HarnessError):
     """The plan contains more tasks than the configured safety limit."""
+
+
+# ── Build / execution layer ───────────────────────────────────────────────────
+
+class BuildError(HarnessError):
+    """Generated code failed to compile or build."""
+
+
+class ExecutionError(HarnessError):
+    """Generated program failed during smoke-test execution."""

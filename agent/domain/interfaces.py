@@ -8,7 +8,9 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from agent.domain.entities import (
+    BuildResult,
     CodePatch,
+    ExecutionResult,
     LintResult,
     ProjectPlan,
     RunSummary,
@@ -110,3 +112,37 @@ class IRunRepository(ABC):
     @abstractmethod
     def load(self, run_id: str) -> Optional[RunSummary]:
         """Load a run summary by its ID. Returns None if not found."""
+
+
+class IExecutionValidator(ABC):
+    """
+    Port for build-and-run validation.
+
+    생성된 전체 프로젝트(워크스페이스)를 대상으로
+    빌드 → 실행 → 종료코드 검증을 수행한다.
+
+    lint(ISensorAdapter)가 개별 파일을 검사하는 것과 달리,
+    IExecutionValidator 는 모든 파일이 완성된 후 프로젝트 전체를 검증한다.
+    """
+
+    @abstractmethod
+    def build(self, workspace_dir: str, dry_run: bool) -> BuildResult:
+        """
+        워크스페이스를 빌드(컴파일)한다.
+        인터프리터 언어는 문법 검사(syntax check)를 수행한다.
+
+        Returns
+        -------
+        BuildResult
+        """
+
+    @abstractmethod
+    def run_smoke_test(self, workspace_dir: str, dry_run: bool) -> ExecutionResult:
+        """
+        빌드된 프로그램을 실제로 실행하고 결과를 반환한다.
+        성공 기준: exit code 0, stderr 에 치명적 오류 없음.
+
+        Returns
+        -------
+        ExecutionResult
+        """

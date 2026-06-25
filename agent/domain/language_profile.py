@@ -91,3 +91,34 @@ class ILanguageProfile(ABC):
         헤더 파일 등 추가 확장자가 있으면 오버라이드.
         """
         return self.extensions
+
+    # ── Build / execution hooks ───────────────────────────────────────────────
+
+    @property
+    def entry_point_pattern(self) -> str:
+        """
+        워크스페이스에서 진입점 파일을 찾는 glob 패턴.
+        ExecutionValidator 가 실행할 파일을 결정할 때 사용한다.
+        예: "src/main.py", "src/main.sh", "src/main"
+        빈 문자열이면 자동 탐색하지 않는다.
+        """
+        return ""
+
+    @property
+    def build_timeout_seconds(self) -> int:
+        """빌드 단계 타임아웃 (초). 기본 60초."""
+        return 60
+
+    @property
+    def run_timeout_seconds(self) -> int:
+        """실행 단계 타임아웃 (초). 기본 30초."""
+        return 30
+
+    @property
+    def run_success_criteria(self) -> str:
+        """
+        실행 성공 판정 기준 설명.
+        기본값: "exit code 0"
+        ExecutionValidator 구현체가 이 기준을 따른다.
+        """
+        return "exit code 0"

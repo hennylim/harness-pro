@@ -40,3 +40,5 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+sandbox_workspace/
+runs/
