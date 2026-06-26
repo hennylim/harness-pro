@@ -31,6 +31,13 @@ from agent.infrastructure.validators.python_validator import (
 
 log = structlog.get_logger(__name__)
 
+_DEFAULT_CFLAGS = [
+    "-Wall",
+    "-Wextra",
+    "-D_GNU_SOURCE",
+    "-D_POSIX_C_SOURCE=200809L",
+]
+
 
 class CExecutionValidator(IExecutionValidator):
     """
@@ -54,7 +61,7 @@ class CExecutionValidator(IExecutionValidator):
         run_timeout: int = 15,
     ) -> None:
         self._std = std
-        self._extra_flags = extra_flags or ["-Wall", "-Wextra"]
+        self._extra_flags = extra_flags or list(_DEFAULT_CFLAGS)
         self._build_timeout = build_timeout
         self._run_timeout = run_timeout
         self._binary_path: str | None = None
@@ -85,9 +92,14 @@ class CExecutionValidator(IExecutionValidator):
         binary = os.path.join(build_dir, "program")
         self._binary_path = binary
 
-        # include 경로: 모든 소스 디렉터리
-        include_dirs = {os.path.dirname(f) for f in src_files}
-        inc_flags = [f"-I{d}" for d in include_dirs]
+        # include 경로: 모든 소스/헤더 디렉터리와 워크스페이스 루트
+        include_dirs = {workspace_dir}
+        include_dirs.update(os.path.dirname(f) for f in src_files)
+        include_dirs.update(
+            str(p.parent) for p in Path(workspace_dir).rglob("*.h")
+            if ".build" not in str(p)
+        )
+        inc_flags = [f"-I{d}" for d in sorted(include_dirs)]
 
         cmd = (
             [compiler, f"-std={self._std}"]

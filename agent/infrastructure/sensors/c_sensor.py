@@ -23,6 +23,14 @@ from agent.infrastructure.sensors.lint_sensor import (
 
 log = structlog.get_logger(__name__)
 
+_DEFAULT_CFLAGS = [
+    "-Wall",
+    "-Wextra",
+    "-Wpedantic",
+    "-D_GNU_SOURCE",
+    "-D_POSIX_C_SOURCE=200809L",
+]
+
 # clang-tidy 에서 활성화할 체크 그룹
 _TIDY_CHECKS = ",".join([
     "clang-diagnostic-*",   # 컴파일러 진단
@@ -54,7 +62,7 @@ class CSensorAdapter(ISensorAdapter):
         use_tidy: bool = True,
     ) -> None:
         self._std = std
-        self._extra_flags = extra_flags or ["-Wall", "-Wextra", "-Wpedantic"]
+        self._extra_flags = extra_flags or list(_DEFAULT_CFLAGS)
         self._use_tidy = use_tidy
 
     def verify_code(self, absolute_path: str, dry_run: bool) -> LintResult:
@@ -65,6 +73,7 @@ class CSensorAdapter(ISensorAdapter):
         # 헤더 파일은 -x c 로 언어를 명시해 문법 검사만 진행
         is_header = absolute_path.endswith(".h")
         lang_flag = ["-x", "c"] if is_header else []
+        include_flags = _build_include_flags(absolute_path)
 
         # ── Step 1: gcc 문법 검사 ──────────────────────────────────────────────
         compiler = shutil.which("gcc") or shutil.which("cc")
@@ -75,6 +84,7 @@ class CSensorAdapter(ISensorAdapter):
             compiler,
             f"-std={self._std}",
             *self._extra_flags,
+            *include_flags,
             *lang_flag,
             "-fsyntax-only",
             absolute_path,
@@ -98,6 +108,8 @@ class CSensorAdapter(ISensorAdapter):
                 "--warnings-as-errors=*",
                 "--",
                 f"-std={self._std}",
+                *self._extra_flags,
+                *include_flags,
                 f"-I{workspace_dir}",   # 같은 디렉터리의 헤더 포함
             ]
             tidy_result = run_subprocess_sensor(tidy_cmd, "clang-tidy", absolute_path)
@@ -105,3 +117,18 @@ class CSensorAdapter(ISensorAdapter):
                 return tidy_result
 
         return LintResult(passed=True, tool="gcc+clang-tidy")
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _build_include_flags(absolute_path: str) -> list[str]:
+    """Return include paths useful for per-file C syntax checks."""
+    source_dir = os.path.dirname(os.path.abspath(absolute_path))
+    workspace_guess = os.path.dirname(source_dir)
+
+    candidates = {source_dir, workspace_guess}
+    for name in ("include", "src"):
+        candidate = os.path.join(workspace_guess, name)
+        if os.path.isdir(candidate):
+            candidates.add(candidate)
+
+    return [f"-I{path}" for path in sorted(candidates)]

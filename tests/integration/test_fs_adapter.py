@@ -61,3 +61,22 @@ class TestSkeleton:
         (tmp_path / "data.json").write_text("{}")
         skeleton = adapter.get_workspace_skeleton()
         assert "data.json" not in skeleton
+
+    def test_skeleton_includes_short_file_content(self, adapter, tmp_path):
+        """짧은 파일도 StopIteration 때문에 unreadable 로 처리되면 안 된다."""
+        (tmp_path / "short.py").write_text("line1\nline2\n")
+        skeleton = adapter.get_workspace_skeleton()
+        assert "short.py" in skeleton
+        assert "line1" in skeleton
+        assert "line2" in skeleton
+        assert "<unreadable>" not in skeleton
+
+    def test_skeleton_includes_declarations_after_first_ten_lines(self, adapter, tmp_path):
+        """C 헤더의 struct/typedef 선언이 10줄 뒤에 있어도 컨텍스트에 포함한다."""
+        header = "\n".join(f"// filler {i}" for i in range(15))
+        header += "\ntypedef struct {\n    char *interface_name;\n} config_t;\n"
+        (tmp_path / "config.h").write_text(header)
+        skeleton = adapter.get_workspace_skeleton(frozenset({".h"}))
+        assert "config.h" in skeleton
+        assert "interface_name" in skeleton
+        assert "config_t" in skeleton

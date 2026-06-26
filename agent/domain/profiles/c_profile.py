@@ -33,7 +33,13 @@ class CProfile(ILanguageProfile):
             "Add a file-level Doxygen comment block (\\file, \\brief).\n"
             "Add \\brief Doxygen comments above each function declaration.\n"
             "Lines ≤ 79 characters.\n"
-            "Do NOT use deprecated POSIX functions."
+            "Do NOT use deprecated POSIX functions.\n"
+            "When implementing .c files, exactly match existing .h "
+            "typedefs, struct fields, enums, and function prototypes; "
+            "do not invent names that are not declared.\n"
+            "For Linux/POSIX APIs, include the required system headers "
+            "for every type/function used (e.g. ssize_t, sigaction, "
+            "strdup, sockets)."
         )
 
     @property

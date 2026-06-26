@@ -182,7 +182,7 @@ class OpenAICompatibleAdapter(ILLMAdapter):
             parts.append(f"\nAlready completed files:\n{memory_summary}")
         if workspace_skeleton:
             parts.append(
-                f"\nWorkspace skeleton (first 10 lines each):\n{workspace_skeleton}"
+                f"\nWorkspace source snapshot (bounded preview of existing files):\n{workspace_skeleton}"
             )
         if error_feedback:
             parts.append(f"\n⚠️  Previous lint errors to fix:\n{error_feedback}")

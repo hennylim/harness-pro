@@ -196,7 +196,7 @@ def main() -> int:
         return 1
 
     _print_summary_table(summary)
-    return 0 if summary.failed_tasks == 0 else 1
+    return 0 if summary.status.value == "completed" else 1
 
 
 if __name__ == "__main__":

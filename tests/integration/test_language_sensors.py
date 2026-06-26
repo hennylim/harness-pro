@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import sys
 import textwrap
 
 import pytest
@@ -240,3 +241,57 @@ class TestLanguageSensorRouterIntegration:
                    "#include <iostream>\nint main(){return 0;}\n")
         result = LanguageSensorRouter().verify_code(f, dry_run=False)
         assert result.passed
+
+
+def test_c_sensor_accepts_linux_posix_daemon_apis(tmp_path):
+    """C17 strict mode에서도 Linux/POSIX 데몬 API 선언을 볼 수 있어야 한다."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Linux-specific feature macros are not applicable")
+    if not (shutil.which("gcc") or shutil.which("cc")):
+        pytest.skip("gcc/cc not installed")
+
+    f = _write(tmp_path / "daemon_api.c", """\
+        #include <signal.h>
+        #include <stdlib.h>
+        #include <string.h>
+        #include <sys/socket.h>
+        #include <sys/types.h>
+
+        int main(void) {
+            struct sigaction sa = {0};
+            char *copy = strdup("eth0");
+            ssize_t bytes = 0;
+            int bind_opt = SO_BINDTODEVICE;
+            (void)sa;
+            (void)bind_opt;
+            free(copy);
+            return (int)bytes;
+        }
+    """)
+    result = CSensorAdapter(use_tidy=False).verify_code(f, dry_run=False)
+    assert result.passed, result.errors
+
+
+def test_c_sensor_finds_workspace_include_dir(tmp_path):
+    """src/*.c 에서 include/*.h 를 바로 include 하는 일반 레이아웃을 지원한다."""
+    if not (shutil.which("gcc") or shutil.which("cc")):
+        pytest.skip("gcc/cc not installed")
+
+    _write(tmp_path / "include" / "dhcpv6_config.h", """\
+        #ifndef DHCPV6_CONFIG_H
+        #define DHCPV6_CONFIG_H
+        typedef struct {
+            int retry_count;
+        } dhcpv6_config_t;
+        #endif
+    """)
+    f = _write(tmp_path / "src" / "main.c", """\
+        #include "dhcpv6_config.h"
+
+        int main(void) {
+            dhcpv6_config_t cfg = { .retry_count = 3 };
+            return cfg.retry_count == 3 ? 0 : 1;
+        }
+    """)
+    result = CSensorAdapter(use_tidy=False).verify_code(f, dry_run=False)
+    assert result.passed, result.errors
