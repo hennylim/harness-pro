@@ -1,10 +1,18 @@
 """
 Google Gemini LLM adapter (google-genai SDK).
 
-언어 확장 포인트
----------------
-PromptBuilder 를 통해 언어별 프롬프트를 받으므로,
-새 언어를 추가해도 이 파일은 수정하지 않는다.
+잘림(Truncation) 대응 전략
+---------------------------
+1. max_output_tokens 를 설정값의 2배까지 자동 증가 (최대 32768).
+   코드 생성 요청은 plan 생성보다 토큰을 훨씬 많이 사용하므로
+   generate_code() 는 max_tokens * 2 로 호출한다.
+
+2. JSON 파싱 실패 시 json_recovery.recover_code_patch_json() 으로
+   부분 복구를 시도한다.
+   - code_block 이 잘린 경우: 잘린 위치까지 추출해 반환.
+   - code_block 이 비어 있는 경우: LLMParseError 로 재시도 유도.
+
+3. generate_code() 재시도 피드백에 "응답이 잘렸습니다" 메시지를 포함.
 """
 from __future__ import annotations
 
@@ -30,9 +38,14 @@ from agent.domain.exceptions import (
     LLMRateLimitError,
 )
 from agent.domain.interfaces import ILLMAdapter
+from agent.infrastructure.llm.json_recovery import recover_code_patch_json
 from agent.infrastructure.llm.prompt_builder import PromptBuilder
 
 log = structlog.get_logger(__name__)
+
+# 코드 생성은 plan 보다 훨씬 많은 토큰을 사용하므로 배수를 적용한다.
+_CODE_TOKEN_MULTIPLIER = 2
+_MAX_TOKENS_HARD_LIMIT = 32768
 
 
 class GeminiAdapter(ILLMAdapter):
@@ -46,9 +59,13 @@ class GeminiAdapter(ILLMAdapter):
     model:
         Gemini 모델명.
     prompt_builder:
-        언어별 프롬프트 빌더. None 이면 Python 기본값 사용.
-    temperature / max_tokens / max_retries:
-        API 호출 파라미터.
+        언어별 프롬프트 빌더.
+    temperature:
+        생성 온도.
+    max_tokens:
+        plan 생성 최대 토큰. code 생성은 이 값의 2배를 사용.
+    max_retries:
+        재시도 최대 횟수.
     """
 
     def __init__(
@@ -57,16 +74,25 @@ class GeminiAdapter(ILLMAdapter):
         model: str = "gemini-2.5-flash-preview-05-20",
         prompt_builder: PromptBuilder | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         max_retries: int = 3,
     ) -> None:
         self._model = model
         self._prompts = prompt_builder or _default_builder()
         self._temperature = temperature
         self._max_tokens = max_tokens
+        # 코드 생성용 토큰: 설정값의 2배 (최대 32768)
+        self._code_max_tokens = min(
+            max_tokens * _CODE_TOKEN_MULTIPLIER, _MAX_TOKENS_HARD_LIMIT
+        )
         self._max_retries = max_retries
         self._client = genai.Client(api_key=api_key)
-        log.info("gemini.adapter.init", model=model)
+        log.info(
+            "gemini.adapter.init",
+            model=model,
+            plan_tokens=max_tokens,
+            code_tokens=self._code_max_tokens,
+        )
 
     # ── ILLMAdapter ───────────────────────────────────────────────────────────
 
@@ -75,11 +101,14 @@ class GeminiAdapter(ILLMAdapter):
         raw = self._call(
             system=self._prompts.build_plan_system(),
             user=f"Requirements:\n{requirements}",
+            max_tokens=self._max_tokens,
         )
         try:
             plan = ProjectPlan(**json.loads(raw))
         except (json.JSONDecodeError, ValidationError) as exc:
-            raise LLMParseError(f"Plan 파싱 실패: {exc}\nRaw:\n{raw[:500]}") from exc
+            raise LLMParseError(
+                f"Plan 파싱 실패: {exc}\nRaw:\n{raw[:500]}"
+            ) from exc
         log.info("llm.plan.ok", task_count=len(plan.tasks))
         return plan
 
@@ -90,7 +119,13 @@ class GeminiAdapter(ILLMAdapter):
         workspace_skeleton: str,
         error_feedback: str,
     ) -> CodePatch:
-        log.info("llm.code.request", provider="gemini", file=task.file_path)
+        log.info(
+            "llm.code.request",
+            provider="gemini",
+            file=task.file_path,
+            retry=task.retry_count,
+            max_tokens=self._code_max_tokens,
+        )
         parts = [
             f"Task: [{task.action.value}] {task.file_path}",
             f"Description: {task.description}",
@@ -102,17 +137,39 @@ class GeminiAdapter(ILLMAdapter):
                 f"\nWorkspace skeleton (first 10 lines each):\n{workspace_skeleton}"
             )
         if error_feedback:
-            parts.append(f"\n⚠️  Previous lint errors to fix:\n{error_feedback}")
+            parts.append(f"\n⚠️  Previous errors to fix:\n{error_feedback}")
 
         raw = self._call(
             system=self._prompts.build_code_system(),
             user="\n".join(parts),
+            max_tokens=self._code_max_tokens,
         )
+
+        # ── JSON 파싱 (잘림 복구 포함) ─────────────────────────────────────────
         try:
-            patch = CodePatch(**json.loads(raw))
-        except (json.JSONDecodeError, ValidationError) as exc:
-            raise LLMParseError(f"CodePatch 파싱 실패: {exc}\nRaw:\n{raw[:500]}") from exc
-        log.info("llm.code.ok", file=patch.target_file)
+            data = recover_code_patch_json(raw)
+        except (json.JSONDecodeError, Exception) as exc:
+            raise LLMParseError(
+                f"CodePatch 파싱 실패: {exc}\nRaw:\n{raw[:500]}"
+            ) from exc
+
+        # code_block 이 비어 있으면 잘림으로 판단 → 재시도 유도
+        if not data.get("code_block", "").strip():
+            raise LLMParseError(
+                f"code_block 이 비어 있습니다 (응답 잘림 의심).\n"
+                f"max_output_tokens={self._code_max_tokens} 로 재시도합니다.\n"
+                f"Raw 마지막 200자: {raw[-200:]}"
+            )
+
+        try:
+            patch = CodePatch(**data)
+        except ValidationError as exc:
+            raise LLMParseError(
+                f"CodePatch 검증 실패: {exc}\ndata={data}"
+            ) from exc
+
+        log.info("llm.code.ok", file=patch.target_file,
+                 code_chars=len(patch.code_block))
         return patch
 
     def summarise_progress(
@@ -128,11 +185,12 @@ class GeminiAdapter(ILLMAdapter):
                 f"Completed:\n{completed_str}\n\n"
                 f"Failed:\n{failed_str}\n\nWrite a brief summary."
             ),
+            max_tokens=512,
         )
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    def _call(self, system: str, user: str) -> str:
+    def _call(self, system: str, user: str, max_tokens: int) -> str:
         @retry(
             retry=retry_if_exception_type(genai_errors.ServerError),
             stop=stop_after_attempt(self._max_retries),
@@ -147,7 +205,7 @@ class GeminiAdapter(ILLMAdapter):
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system,
                         temperature=self._temperature,
-                        max_output_tokens=self._max_tokens,
+                        max_output_tokens=max_tokens,
                         response_mime_type="application/json",
                     ),
                 )
@@ -157,6 +215,7 @@ class GeminiAdapter(ILLMAdapter):
                     "gemini.raw_response",
                     tokens_in=getattr(usage, "prompt_token_count", None),
                     tokens_out=getattr(usage, "candidates_token_count", None),
+                    max_tokens=max_tokens,
                 )
                 return text
             except genai_errors.ClientError as exc:

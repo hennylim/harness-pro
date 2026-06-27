@@ -1,17 +1,21 @@
 """
 PromptBuilder – ILanguageProfile 을 받아 LLM system/user 프롬프트를 조립한다.
 
-설계 원칙
----------
-* LLM 어댑터(OpenAI, Gemini …)는 이 클래스를 사용한다.
-* 언어 추가 시 이 파일은 수정하지 않는다 – 언어별 규칙은 ILanguageProfile 에 있다.
-* 어댑터는 build_plan_system() / build_code_system() 을 호출해 프롬프트를 얻는다.
+JSON 잘림 방지 전략
+-------------------
+문제: explanation 필드가 길어지면 code_block 에 도달하기 전에 토큰이 소진됨.
+해결:
+  1. explanation 을 한 문장(≤ 20 단어)으로 강제 제한.
+  2. JSON 필드 순서를 code_block 이 마지막이 되도록 고정.
+     → 토큰이 부족해도 target_file 과 explanation 은 완성되고
+       code_block 만 잘리므로 복구 시도 가능.
+  3. code_block 내부의 큰따옴표는 이스케이프하도록 명시.
 """
 from __future__ import annotations
 
 from agent.domain.language_profile import ILanguageProfile
 
-# ── 언어 무관 공통 뼈대 ───────────────────────────────────────────────────────
+# ── 플랜 생성 프롬프트 ────────────────────────────────────────────────────────
 
 _PLAN_SKELETON = """\
 You are an expert software architect.
@@ -33,20 +37,39 @@ Rules:
 - Use {lang_name} file extensions ({ext_hint}).
 - List tasks in dependency order (dependencies first).
 - Be specific: the description must be implementable without further context.
+- Keep each description under 20 words.
 """
+
+# ── 코드 생성 프롬프트 ────────────────────────────────────────────────────────
+# CRITICAL: JSON 필드 순서는 반드시 아래 순서를 유지한다.
+#   1. target_file  (짧음 – 항상 완성됨)
+#   2. explanation  (한 문장 – 짧게 강제)
+#   3. code_block   (마지막 – 가장 중요, 토큰이 부족하면 여기서 잘림)
+#
+# 이렇게 하면 code_block 이 잘려도 부분 복구가 가능하고,
+# target_file 과 explanation 은 항상 완성된다.
 
 _CODE_SKELETON = """\
 You are a senior software engineer writing production-quality {lang_name} code.
-Return ONLY a single JSON object (no markdown, no commentary):
+
+CRITICAL JSON FORMAT RULES (violations cause immediate failure):
+1. Return ONLY this JSON structure, in EXACTLY this field order:
 {{
   "target_file": "<same relative path as the task>",
-  "explanation": "<one paragraph: what this file does and key design decisions>",
-  "code_block": "<complete, runnable {lang_name} source code as a single string>"
+  "explanation": "<ONE sentence, max 15 words, describing what this file does>",
+  "code_block": "<complete {lang_name} source code>"
 }}
-Rules:
-- code_block must contain the ENTIRE file, not just a snippet.
+2. explanation MUST be ONE sentence, 15 words maximum. No exceptions.
+3. code_block MUST contain the ENTIRE file from first line to last line.
+4. NEVER truncate code_block. Output the complete file even if it is long.
+5. Escape all double-quotes inside code_block as \\".
+6. No trailing whitespace on any line of code_block.
+7. Only import/source modules that are actually used.
+8. Do NOT wrap code_block in markdown fences.
+9. The last character of code_block must be a complete line (ending with \\n).
+
+{lang_name} style rules:
 {style_rules}
-- Do NOT wrap code_block in markdown fences.
 {header_hint}"""
 
 _SUMMARISE_SYSTEM = """\
@@ -68,19 +91,15 @@ class PromptBuilder:
     def __init__(self, profile: ILanguageProfile) -> None:
         self._profile = profile
 
-    # ── Public API ─────────────────────────────────────────────────────────────
-
     def build_plan_system(self) -> str:
-        """플랜 생성 system 프롬프트 반환."""
         p = self._profile
         return _PLAN_SKELETON.format(
             lang_name=p.name,
-            ext=next(iter(sorted(p.extensions))),   # 첫 번째 확장자 예시
+            ext=next(iter(sorted(p.extensions))),
             ext_hint=p.plan_file_extension_hint,
         )
 
     def build_code_system(self) -> str:
-        """코드 생성 system 프롬프트 반환."""
         p = self._profile
         style_lines = "\n".join(
             f"- {line}" for line in p.code_style_rules.splitlines() if line.strip()
@@ -98,5 +117,4 @@ class PromptBuilder:
 
     @staticmethod
     def build_summarise_system() -> str:
-        """진행 요약 system 프롬프트 반환 (언어 무관)."""
         return _SUMMARISE_SYSTEM

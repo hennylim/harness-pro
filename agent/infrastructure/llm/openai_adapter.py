@@ -54,6 +54,7 @@ from agent.domain.exceptions import (
     LLMTimeoutError,
 )
 from agent.domain.interfaces import ILLMAdapter
+from agent.infrastructure.llm.json_recovery import recover_code_patch_json
 from agent.infrastructure.llm.prompt_builder import PromptBuilder
 
 log = structlog.get_logger(__name__)
@@ -142,6 +143,8 @@ class OpenAICompatibleAdapter(ILLMAdapter):
         self._max_tokens = max_tokens
         self._timeout = timeout_seconds
         self._max_retries = max_retries
+        # 코드 생성용 토큰: plan 보다 2배 (최대 32768)
+        self._code_max_tokens = min(max_tokens * 2, 32768)
         self._client = OpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -190,14 +193,25 @@ class OpenAICompatibleAdapter(ILLMAdapter):
         raw = self._call(
             system=self._prompts.build_code_system(),
             user="\n".join(parts),
+            override_max_tokens=self._code_max_tokens,
         )
         try:
-            patch = CodePatch(**json.loads(raw))
-        except (json.JSONDecodeError, ValidationError) as exc:
+            data = recover_code_patch_json(raw)
+        except (json.JSONDecodeError, Exception) as exc:
             raise LLMParseError(
                 f"Could not parse code response: {exc}\nRaw:\n{raw[:500]}"
             ) from exc
-        log.info("llm.code.ok", file=patch.target_file)
+        if not data.get("code_block", "").strip():
+            raise LLMParseError(
+                f"code_block 이 비어 있습니다 (응답 잘림 의심).\n"
+                f"Raw 마지막 200자: {raw[-200:]}"
+            )
+        try:
+            patch = CodePatch(**data)
+        except ValidationError as exc:
+            raise LLMParseError(f"CodePatch 검증 실패: {exc}") from exc
+        log.info("llm.code.ok", file=patch.target_file,
+                 code_chars=len(patch.code_block))
         return patch
 
     def summarise_progress(
@@ -217,7 +231,7 @@ class OpenAICompatibleAdapter(ILLMAdapter):
 
     # ── Internal: 협상 + 재시도 통합 진입점 ──────────────────────────────────
 
-    def _call(self, system: str, user: str) -> str:
+    def _call(self, system: str, user: str, override_max_tokens: int | None = None) -> str:
         """
         외부에서 사용하는 단일 진입점.
 
@@ -226,10 +240,10 @@ class OpenAICompatibleAdapter(ILLMAdapter):
         이미 모드가 결정된 경우 _call_with_retry() 로 바로 호출.
         """
         if self._json_mode == JsonMode.AUTO:
-            return self._negotiate_and_call(system, user)
-        return self._call_with_retry(system, user, self._json_mode)
+            return self._negotiate_and_call(system, user, override_max_tokens)
+        return self._call_with_retry(system, user, self._json_mode, override_max_tokens)
 
-    def _negotiate_and_call(self, system: str, user: str) -> str:
+    def _negotiate_and_call(self, system: str, user: str, override_max_tokens: int | None = None) -> str:
         """
         모드를 탐색하면서 첫 성공 응답을 바로 반환한다.
         성공한 모드를 캐시하여 이후 호출에서 재탐색하지 않는다.
@@ -239,7 +253,7 @@ class OpenAICompatibleAdapter(ILLMAdapter):
         for mode in probe_order:
             log.info("llm.json_mode.probe", mode=mode.value)
             try:
-                result = self._single_raw_call(system, user, mode)
+                result = self._single_raw_call(system, user, mode, override_max_tokens)
                 # 성공 → 모드 캐시 후 결과 바로 반환 (이중 호출 없음)
                 self._json_mode = mode
                 log.info("llm.json_mode.selected", mode=mode.value)
@@ -266,7 +280,7 @@ class OpenAICompatibleAdapter(ILLMAdapter):
             "Server rejected json_object, json_schema, and plain_prompt."
         )
 
-    def _call_with_retry(self, system: str, user: str, mode: JsonMode) -> str:
+    def _call_with_retry(self, system: str, user: str, mode: JsonMode, override_max_tokens: int | None = None) -> str:
         """확정된 모드로 tenacity 재시도 래퍼를 통해 호출한다."""
 
         @retry(
@@ -289,7 +303,7 @@ class OpenAICompatibleAdapter(ILLMAdapter):
         except Exception as exc:
             raise LLMError(f"Unexpected LLM error: {exc}") from exc
 
-    def _single_raw_call(self, system: str, user: str, mode: JsonMode) -> str:
+    def _single_raw_call(self, system: str, user: str, mode: JsonMode, override_max_tokens: int | None = None) -> str:
         """
         재시도·협상 없는 단일 API 호출.
         성공 시 content 문자열 반환; 실패 시 openai 예외를 그대로 전파.
@@ -298,7 +312,7 @@ class OpenAICompatibleAdapter(ILLMAdapter):
         kwargs: dict[str, Any] = dict(
             model=self._model,
             temperature=self._temperature,
-            max_tokens=self._max_tokens,
+            max_tokens=override_max_tokens or self._max_tokens,
         )
 
         rf = _build_response_format(mode)

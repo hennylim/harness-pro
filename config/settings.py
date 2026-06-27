@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     ai_base_url: str = "http://localhost:11434/v1"
     ai_api_key: str = "ollama"
     ai_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-    ai_max_tokens: int = Field(default=4096, ge=256, le=32768)
+    ai_max_tokens: int = Field(default=8192, ge=256, le=32768)
     ai_timeout_seconds: int = Field(default=120, ge=10)
     ai_max_retries: int = Field(default=3, ge=1, le=10)
 

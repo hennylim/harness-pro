@@ -6,6 +6,7 @@
 .env
 config/api_keys.json
 config/reviewer_config.json
+.env-homepc
 
 # ── 실행 결과 (공유 불필요) ────────────────────────────────────────────────────
 output/
@@ -27,6 +28,7 @@ ENV/
 *.egg-info/
 dist/
 build/
+myenv/
 
 # ── 개발 도구 ─────────────────────────────────────────────────────────────────
 .idea/
