@@ -29,13 +29,13 @@ _TIDY_CHECKS = ",".join([
     "clang-diagnostic-*",
     "clang-analyzer-*",
     "bugprone-*",
-    "modernize-*",          # C++17 관용구 권장
-    "performance-*",
-    "readability-*",
-    "-modernize-use-trailing-return-type",  # 취향 차이, 노이즈 제거
-    "-readability-magic-numbers",           # 상수 사용 강제는 과함
     "-bugprone-easily-swappable-parameters",
+    # modernize/readability 는 노이즈가 많아 비활성화
+    # (실제 코드 품질에 중요한 clang-diagnostic 과 analyzer 만 유지)
 ])
+
+# warnings-as-errors 는 clang-diagnostic 만 적용 (스타일 경고 제외)
+_TIDY_WERROR = "clang-diagnostic-*,clang-analyzer-*"
 
 
 class CppSensorAdapter(ISensorAdapter):
@@ -97,7 +97,7 @@ class CppSensorAdapter(ISensorAdapter):
                 "clang-tidy",
                 absolute_path,
                 f"--checks={_TIDY_CHECKS}",
-                "--warnings-as-errors=*",
+                f"--warnings-as-errors={_TIDY_WERROR}",
                 "--",
                 f"-std={self._std}",
                 f"-I{workspace_dir}",

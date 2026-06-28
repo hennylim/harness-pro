@@ -143,8 +143,8 @@ class PythonExecutionValidator(IExecutionValidator):
             )
         log.info('validator.run.entry_selected', entry=entry)
 
-        cmd = ["python3", entry] + self._extra_run_args
-        return _run_command(cmd, workspace_dir, self._run_timeout)
+        return _run_python_entry(entry, workspace_dir, self._run_timeout,
+                                  self._extra_run_args)
 
 
 # ── 공용 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -156,6 +156,70 @@ def _find_entry_point(workspace_dir: str, candidates: list[str]) -> str | None:
         if os.path.isfile(full):
             return full
     return None
+
+
+def _run_python_entry(
+    entry: str,
+    workspace_dir: str,
+    timeout: int,
+    extra_args: list[str] | None = None,
+) -> ExecutionResult:
+    """
+    Python 진입점을 실행한다.
+
+    PYTHONPATH 에 workspace_dir 을 추가하여 src/ 패키지를 import 할 수 있도록 한다.
+    예: /ws/src/main.py → python3 /ws/src/main.py (PYTHONPATH=/ws)
+    """
+    import subprocess
+    env = os.environ.copy()
+    # workspace_dir 을 PYTHONPATH 에 추가 (기존 값 앞에 삽입)
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        workspace_dir + os.pathsep + existing_pp
+        if existing_pp
+        else workspace_dir
+    )
+
+    cmd = ["python3", entry] + (extra_args or [])
+    cmd_str = " ".join(cmd)
+    log.info("validator.run.exec", command=cmd_str, cwd=workspace_dir)
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=workspace_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+        passed = result.returncode == 0
+        error_summary = ""
+        if not passed:
+            error_summary = (
+                f"exit code {result.returncode}\n"
+                + (result.stderr.strip() or result.stdout.strip())[:500]
+            )
+        log.info("validator.run.done", command=cmd_str,
+                 exit_code=result.returncode, passed=passed)
+        return ExecutionResult(
+            passed=passed,
+            exit_code=result.returncode,
+            stdout=result.stdout[:2000],
+            stderr=result.stderr[:2000],
+            command=cmd_str,
+            error_summary=error_summary,
+        )
+    except subprocess.TimeoutExpired:
+        return ExecutionResult(
+            passed=False, exit_code=-1, command=cmd_str,
+            error_summary=f"실행 타임아웃 ({timeout}s)",
+        )
+    except Exception as exc:
+        return ExecutionResult(
+            passed=False, exit_code=-1, command=cmd_str,
+            error_summary=str(exc),
+        )
 
 
 def _run_command(

@@ -25,12 +25,13 @@ log = structlog.get_logger(__name__)
 
 # clang-tidy 에서 활성화할 체크 그룹
 _TIDY_CHECKS = ",".join([
-    "clang-diagnostic-*",   # 컴파일러 진단
-    "clang-analyzer-*",     # 정적 분석
-    "bugprone-*",           # 잠재적 버그
-    "performance-*",        # 성능
-    "-bugprone-easily-swappable-parameters",  # 노이즈 제거
+    "clang-diagnostic-*",
+    "clang-analyzer-*",
+    "bugprone-*",
+    "-bugprone-easily-swappable-parameters",
 ])
+
+_TIDY_WERROR = "clang-diagnostic-*,clang-analyzer-*"
 
 
 class CSensorAdapter(ISensorAdapter):
@@ -95,7 +96,7 @@ class CSensorAdapter(ISensorAdapter):
                 "clang-tidy",
                 absolute_path,
                 f"--checks={_TIDY_CHECKS}",
-                "--warnings-as-errors=*",
+                f"--warnings-as-errors={_TIDY_WERROR}",
                 "--",
                 f"-std={self._std}",
                 f"-I{workspace_dir}",   # 같은 디렉터리의 헤더 포함

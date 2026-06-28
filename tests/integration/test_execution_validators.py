@@ -57,6 +57,19 @@ class TestPythonValidator:
         assert run.passed, run.error_summary
         assert "ok" in run.stdout
 
+    def test_run_pass_with_src_package_import(self, tmp_path):
+        """src/ 패키지를 import 하는 경우 PYTHONPATH 가 올바르게 설정되어야 한다."""
+        _write(str(tmp_path / "src/utils.py"),
+               '"""Utils."""\n\n\ndef greet(name: str) -> str:\n    """Return greeting."""\n    return f"Hello, {name}!"\n')
+        _write(str(tmp_path / "src/main.py"),
+               '"""Main."""\nfrom src.utils import greet\n\nif __name__ == "__main__":\n    print(greet("world"))\n')
+        v = PythonExecutionValidator(run_timeout=10)
+        build = v.build(str(tmp_path), dry_run=False)
+        assert build.passed, build.errors
+        run = v.run_smoke_test(str(tmp_path), dry_run=False)
+        assert run.passed, run.error_summary
+        assert "Hello, world!" in run.stdout
+
     def test_run_fail_no_entry_point(self, tmp_path):
         # .py 파일이 아예 없는 경우 진입점을 찾을 수 없어야 한다
         _write(str(tmp_path / "src/README.md"), "# docs\n")
