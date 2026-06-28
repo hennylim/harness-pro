@@ -26,6 +26,8 @@ from pathlib import Path
 
 import structlog
 
+from agent.infrastructure.validators.entry_point_finder import find_python_entry
+
 from agent.domain.entities import BuildResult, ExecutionResult
 from agent.domain.interfaces import IExecutionValidator
 
@@ -124,17 +126,22 @@ class PythonExecutionValidator(IExecutionValidator):
             log.debug("validator.run.dry_run", lang="python")
             return _DRY_RUN_EXEC
 
-        entry = _find_entry_point(workspace_dir, _ENTRY_CANDIDATES)
+        entry = find_python_entry(workspace_dir)
         if entry is None:
+            # 워크스페이스의 실제 파일 목록을 에러에 포함
+            from pathlib import Path
+            found = sorted(str(p) for p in Path(workspace_dir).rglob('*.py')
+                           if '__pycache__' not in str(p))
             return ExecutionResult(
                 passed=False,
                 exit_code=-1,
-                command="",
+                command='',
                 error_summary=(
-                    f"진입점을 찾을 수 없습니다. "
-                    f"후보: {_ENTRY_CANDIDATES}"
+                    '진입점 .py 파일을 찾을 수 없습니다.\n'
+                    f'워크스페이스 내 .py 파일: {found}'
                 ),
             )
+        log.info('validator.run.entry_selected', entry=entry)
 
         cmd = ["python3", entry] + self._extra_run_args
         return _run_command(cmd, workspace_dir, self._run_timeout)

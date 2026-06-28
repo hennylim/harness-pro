@@ -1,42 +1,30 @@
 """
 Bash ExecutionValidator.
 
-Build 단계
-----------
-  bash -n <script> 로 모든 .sh 파일의 문법을 검사한다.
-  shellcheck 와 달리 bash 자체 파서로 검사하므로 실행 환경과 동일한 결과를 보장한다.
-
-Smoke-test 단계
----------------
-  진입점 스크립트(main.sh / src/main.sh)를 실제로 실행한다.
-  대화형 입력이 필요한 스크립트는 /dev/null 을 stdin 으로 연결하고,
-  --dry-run / --help 등의 플래그를 우선 시도한다.
+Build 단계: bash -n 으로 모든 .sh 파일 문법 검사.
+Smoke-test: 진입점을 동적으로 탐색한 뒤 실행.
+  1. 고정 후보(main.sh 등) 확인
+  2. 없으면 파일명·shebang·main() 호출 패턴으로 자동 탐색
 """
 from __future__ import annotations
 
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import structlog
 
 from agent.domain.entities import BuildResult, ExecutionResult
 from agent.domain.interfaces import IExecutionValidator
+from agent.infrastructure.validators.entry_point_finder import find_bash_entry
 from agent.infrastructure.validators.python_validator import (
     _DRY_RUN_BUILD,
     _DRY_RUN_EXEC,
-    _find_entry_point,
     _run_command,
 )
 
 log = structlog.get_logger(__name__)
-
-_ENTRY_CANDIDATES = [
-    "src/main.sh",
-    "main.sh",
-    "src/run.sh",
-    "run.sh",
-]
 
 
 class BashExecutionValidator(IExecutionValidator):
@@ -50,7 +38,9 @@ class BashExecutionValidator(IExecutionValidator):
     run_timeout:
         진입점 실행 타임아웃 (초).
     run_flags:
-        진입점 실행 시 전달할 플래그 (기본: ["--help"] → 없으면 빈 stdin).
+        진입점 실행 시 전달할 플래그 (기본: ["--help"]).
+    extra_entry_candidates:
+        고정 후보 목록을 추가로 지정 (동적 탐색 전에 먼저 확인).
     """
 
     def __init__(
@@ -58,11 +48,12 @@ class BashExecutionValidator(IExecutionValidator):
         build_timeout: int = 30,
         run_timeout: int = 15,
         run_flags: list[str] | None = None,
+        extra_entry_candidates: list[str] | None = None,
     ) -> None:
         self._build_timeout = build_timeout
         self._run_timeout = run_timeout
-        # --help 가 있으면 대화형 입력 없이 종료 가능
         self._run_flags = run_flags if run_flags is not None else ["--help"]
+        self._extra_candidates = extra_entry_candidates or []
 
     # ── IExecutionValidator ───────────────────────────────────────────────────
 
@@ -105,21 +96,28 @@ class BashExecutionValidator(IExecutionValidator):
         return BuildResult(passed=passed, errors=errors, tool="bash -n")
 
     def run_smoke_test(self, workspace_dir: str, dry_run: bool) -> ExecutionResult:
-        """진입점 스크립트를 실제로 실행한다."""
+        """진입점 스크립트를 동적으로 탐색한 후 실행한다."""
         if dry_run:
             log.debug("validator.run.dry_run", lang="bash")
             return _DRY_RUN_EXEC
 
-        entry = _find_entry_point(workspace_dir, _ENTRY_CANDIDATES)
+        entry = find_bash_entry(workspace_dir, self._extra_candidates or None)
+
         if entry is None:
+            # 워크스페이스의 실제 파일 목록을 에러에 포함
+            found = sorted(str(p) for p in Path(workspace_dir).rglob("*.sh"))
             return ExecutionResult(
                 passed=False,
                 exit_code=-1,
                 command="",
                 error_summary=(
-                    f"진입점을 찾을 수 없습니다. 후보: {_ENTRY_CANDIDATES}"
+                    "진입점 .sh 파일을 찾을 수 없습니다.\n"
+                    f"워크스페이스 내 .sh 파일: {found}"
                 ),
             )
+
+        rel_entry = os.path.relpath(entry, workspace_dir)
+        log.info("validator.run.entry_selected", entry=rel_entry)
 
         # 실행 권한 부여
         try:
@@ -128,31 +126,48 @@ class BashExecutionValidator(IExecutionValidator):
         except OSError:
             pass
 
-        # --help 플래그로 먼저 시도, 실패하면 빈 stdin 으로 재시도
-        cmd = ["bash", entry] + self._run_flags
-        result = _run_command(cmd, workspace_dir, self._run_timeout)
+        # 1차: --help 플래그로 시도
+        if self._run_flags:
+            cmd = ["bash", entry] + self._run_flags
+            result = _run_command(cmd, workspace_dir, self._run_timeout)
+            if result.passed:
+                return result
+            log.debug("validator.run.help_failed", entry=rel_entry)
 
-        if not result.passed and self._run_flags:
-            # --help 를 지원하지 않는 스크립트 → stdin 을 /dev/null 로 연결
-            import subprocess
-            try:
-                proc = subprocess.run(
-                    ["bash", entry],
-                    cwd=workspace_dir,
-                    stdin=subprocess.DEVNULL,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._run_timeout,
-                )
-                if proc.returncode == 0:
-                    return ExecutionResult(
-                        passed=True,
-                        exit_code=0,
-                        stdout=proc.stdout[:2000],
-                        stderr=proc.stderr[:2000],
-                        command=f"bash {entry} (stdin=/dev/null)",
-                    )
-            except Exception:  # noqa: BLE001
-                pass
-
-        return result
+        # 2차: stdin=/dev/null 으로 비대화형 실행
+        log.debug("validator.run.devnull_attempt", entry=rel_entry)
+        try:
+            proc = subprocess.run(
+                ["bash", entry],
+                cwd=workspace_dir,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=self._run_timeout,
+            )
+            return ExecutionResult(
+                passed=proc.returncode == 0,
+                exit_code=proc.returncode,
+                stdout=proc.stdout[:2000],
+                stderr=proc.stderr[:2000],
+                command=f"bash {rel_entry} (stdin=/dev/null)",
+                error_summary=(
+                    "" if proc.returncode == 0
+                    else f"exit code {proc.returncode}\n"
+                    + (proc.stderr or proc.stdout)[:300]
+                ),
+            )
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(
+                passed=False,
+                exit_code=-1,
+                command=f"bash {rel_entry}",
+                error_summary=f"실행 타임아웃 ({self._run_timeout}s)",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return ExecutionResult(
+                passed=False,
+                exit_code=-1,
+                command=f"bash {rel_entry}",
+                error_summary=str(exc),
+            )

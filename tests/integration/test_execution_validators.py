@@ -58,7 +58,8 @@ class TestPythonValidator:
         assert "ok" in run.stdout
 
     def test_run_fail_no_entry_point(self, tmp_path):
-        _write(str(tmp_path / "src/helper.py"), "x = 1\n")
+        # .py 파일이 아예 없는 경우 진입점을 찾을 수 없어야 한다
+        _write(str(tmp_path / "src/README.md"), "# docs\n")
         v = PythonExecutionValidator()
         run = v.run_smoke_test(str(tmp_path), dry_run=False)
         assert not run.passed
@@ -118,8 +119,8 @@ class TestBashValidator:
         assert run.passed, run.error_summary
 
     def test_run_fail_no_entry(self, tmp_path):
-        _write(str(tmp_path / "src/helper.sh"),
-               '#!/usr/bin/env bash\necho helper\n')
+        # .sh 파일이 아예 없는 경우 진입점을 찾을 수 없어야 한다
+        _write(str(tmp_path / "src/README.md"), "# docs\n")
         run = BashExecutionValidator().run_smoke_test(str(tmp_path), dry_run=False)
         assert not run.passed
         assert "진입점" in run.error_summary
