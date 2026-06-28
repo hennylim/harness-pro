@@ -61,3 +61,42 @@ class TestSkeleton:
         (tmp_path / "data.json").write_text("{}")
         skeleton = adapter.get_workspace_skeleton()
         assert "data.json" not in skeleton
+
+    def test_skeleton_header_full_content(self, tmp_path):
+        """헤더 파일(.h)은 줄 제한 없이 전체 포함."""
+        from agent.infrastructure.fs.local_adapter import LocalFileSystemAdapter
+        adapter = LocalFileSystemAdapter(str(tmp_path))
+        import os
+        os.makedirs(str(tmp_path / "include"), exist_ok=True)
+        # 50줄짜리 헤더
+        header = "\n".join([f"/* line {i} */" for i in range(50)]) + "\n"
+        (tmp_path / "include/lib.h").write_text(header)
+        # 40줄짜리 소스 (30줄 제한 적용)
+        os.makedirs(str(tmp_path / "src"), exist_ok=True)
+        src = "\n".join([f"// line {i}" for i in range(40)]) + "\n"
+        (tmp_path / "src/main.c").write_text(src)
+
+        skeleton = adapter.get_workspace_skeleton(
+            accepted_extensions=frozenset({".h", ".c"}),
+            header_extensions=frozenset({".h"}),
+        )
+        # 헤더는 전체 50줄
+        assert skeleton.count("/* line ") == 50
+        # 소스는 30줄 제한
+        assert skeleton.count("// line ") == 30
+        assert "more lines" in skeleton
+
+    def test_skeleton_excludes_build_dir(self, tmp_path):
+        """`.build` 디렉터리는 skeleton에서 제외."""
+        from agent.infrastructure.fs.local_adapter import LocalFileSystemAdapter
+        import os
+        adapter = LocalFileSystemAdapter(str(tmp_path))
+        os.makedirs(str(tmp_path / ".build"))
+        (tmp_path / ".build/program.c").write_text("// generated\n")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src/main.c").write_text("// real\n")
+        skeleton = adapter.get_workspace_skeleton(
+            accepted_extensions=frozenset({".c"}),
+        )
+        assert "program.c" not in skeleton
+        assert "main.c" in skeleton

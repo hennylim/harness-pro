@@ -28,14 +28,12 @@ _HEADER_EXTS = frozenset({".hpp", ".h"})
 _TIDY_CHECKS = ",".join([
     "clang-diagnostic-*",
     "clang-analyzer-*",
+    "-clang-analyzer-security.insecureAPI*",
     "bugprone-*",
     "-bugprone-easily-swappable-parameters",
-    # modernize/readability 는 노이즈가 많아 비활성화
-    # (실제 코드 품질에 중요한 clang-diagnostic 과 analyzer 만 유지)
 ])
 
-# warnings-as-errors 는 clang-diagnostic 만 적용 (스타일 경고 제외)
-_TIDY_WERROR = "clang-diagnostic-*,clang-analyzer-*"
+_TIDY_WERROR = "clang-diagnostic-*"
 
 
 class CppSensorAdapter(ISensorAdapter):

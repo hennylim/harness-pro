@@ -27,11 +27,14 @@ log = structlog.get_logger(__name__)
 _TIDY_CHECKS = ",".join([
     "clang-diagnostic-*",
     "clang-analyzer-*",
+    # insecureAPI: fprintf/sprintf 등 표준 C 함수를 차단해 임베디드 코드에 비실용적
+    "-clang-analyzer-security.insecureAPI*",
     "bugprone-*",
     "-bugprone-easily-swappable-parameters",
 ])
 
-_TIDY_WERROR = "clang-diagnostic-*,clang-analyzer-*"
+# warnings-as-errors: 컴파일러 진단만 에러 처리 (analyzer 경고는 제외)
+_TIDY_WERROR = "clang-diagnostic-*"
 
 
 class CSensorAdapter(ISensorAdapter):

@@ -103,34 +103,53 @@ class LocalFileSystemAdapter(IFileSystemAdapter):
     def get_workspace_skeleton(
         self,
         accepted_extensions: frozenset | None = None,
+        header_extensions: frozenset | None = None,
+        max_lines_per_file: int = 30,
     ) -> str:
         """
-        Return a compact text snapshot of workspace source files
-        (first 10 lines each). Used as context in code-generation prompts.
+        Return a compact text snapshot of workspace source files.
+
+        헤더 파일(.h, .hpp)은 타입/시그니처 선언이 포함되므로 전체를 포함한다.
+        다른 파일은 max_lines_per_file 줄까지 포함한다.
 
         Parameters
         ----------
         accepted_extensions:
             파일 확장자 필터 (점 포함, 소문자). None 이면 .py 만 포함 (하위 호환).
+        header_extensions:
+            전체 내용을 포함할 헤더 확장자. None 이면 {".h", ".hpp"}.
+        max_lines_per_file:
+            일반 소스 파일의 최대 포함 줄 수 (기본 30).
         """
         exts = accepted_extensions or frozenset({".py"})
+        full_exts = header_extensions or frozenset({".h", ".hpp"})
         lines: list[str] = []
         for root, dirs, files in os.walk(self._base):
             dirs[:] = [
                 d for d in sorted(dirs)
-                if not d.startswith(".") and d != "__pycache__"
+                if not d.startswith(".") and d != "__pycache__" and d != ".build"
             ]
             for fname in sorted(files):
-                if os.path.splitext(fname)[1].lower() not in exts:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in exts:
                     continue
                 full = os.path.join(root, fname)
                 rel = os.path.relpath(full, self._base)
                 lines.append(f"\n--- [{rel}] ---")
                 try:
                     with open(full, encoding="utf-8") as fh:
-                        head = [next(fh) for _ in range(10) if True]
-                    lines.extend(head)
-                except (OSError, StopIteration):
+                        file_lines = fh.readlines()
+                    # 헤더 파일은 전체 포함 (타입/함수 선언이 모두 필요)
+                    if ext in full_exts:
+                        lines.extend(file_lines)
+                    else:
+                        lines.extend(file_lines[:max_lines_per_file])
+                        if len(file_lines) > max_lines_per_file:
+                            remaining = len(file_lines) - max_lines_per_file
+                            lines.append(
+                                f"  ... ({remaining} more lines) ...\n"
+                            )
+                except OSError:
                     lines.append("  <unreadable>")
         return "".join(lines)
 

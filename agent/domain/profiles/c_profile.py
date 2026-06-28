@@ -50,5 +50,10 @@ class CProfile(ILanguageProfile):
         return ".c / .h"
 
     @property
+    def header_extensions(self) -> frozenset[str]:
+        """헤더 파일은 전체 내용을 skeleton에 포함 (타입 선언 일관성 유지)."""
+        return frozenset({".h"})
+
+    @property
     def requires_compilation(self) -> bool:
         return True

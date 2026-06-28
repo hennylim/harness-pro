@@ -67,6 +67,8 @@ class IFileSystemAdapter(ABC):
     def get_workspace_skeleton(
         self,
         accepted_extensions: frozenset | None = None,
+        header_extensions: frozenset | None = None,
+        max_lines_per_file: int = 30,
     ) -> str:
         """Return a compact text representation of existing workspace files.
 
@@ -74,7 +76,10 @@ class IFileSystemAdapter(ABC):
         ----------
         accepted_extensions:
             파일 확장자 필터 (점 포함, 소문자).
-            None 이면 구현체 기본값(보통 .py)을 사용한다.
+        header_extensions:
+            전체 내용을 포함할 헤더 확장자 (기본: .h, .hpp).
+        max_lines_per_file:
+            일반 소스 파일 최대 포함 줄 수.
         """
 
     @abstractmethod

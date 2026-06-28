@@ -222,7 +222,13 @@ class HarnessOrchestrator:
                 accepted_extensions=(
                     self._language_profile.skeleton_extensions
                     if self._language_profile else None
-                )
+                ),
+                header_extensions=(
+                    self._language_profile.header_extensions
+                    if self._language_profile
+                    and hasattr(self._language_profile, "header_extensions")
+                    else None
+                ),
             )
 
             # ── Generate ───────────────────────────────────────────────────────
@@ -336,21 +342,61 @@ class HarnessOrchestrator:
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _build_error_feedback(task: Task) -> str:
+    def _build_error_feedback(self, task: Task) -> str:
         if not task.error_history:
             return ""
         last_error = task.error_history[-1]
+
+        # C/C++ 파일인 경우 헤더 파일 내용을 피드백에 포함
+        header_note = ""
+        if self._language_profile and hasattr(
+            self._language_profile, "header_extensions"
+        ):
+            header_exts = self._language_profile.header_extensions
+            if any(
+                task.file_path.endswith((".c", ".cpp", ".cc", ".cxx"))
+                for _ in [None]
+            ):
+                header_contents = self._collect_header_contents(header_exts)
+                if header_contents:
+                    header_note = (
+                        "\n=== 헤더 파일 선언 (반드시 이 시그니처를 사용하세요) ===\n"
+                        + header_contents
+                        + "\n=== 헤더 파일 끝 ===\n"
+                    )
+
         return (
             f"=== 이전 시도 #{task.retry_count} 실패 – 아래 문제를 반드시 수정하세요 ===\n"
             f"{last_error}\n"
+            f"{header_note}"
             "=== 수정 지침 ===\n"
             "1. 위 에러가 발생한 줄을 찾아 정확히 수정하세요.\n"
-            "2. 코드 전체를 처음부터 끝까지 완성된 형태로 반환하세요.\n"
-            "3. 줄 끝에 공백(trailing whitespace)이 없어야 합니다.\n"
-            "4. import 한 모듈은 반드시 코드에서 사용해야 합니다.\n"
+            "2. 헤더 파일에 선언된 함수 시그니처와 정확히 일치해야 합니다.\n"
+            "3. 코드 전체를 처음부터 끝까지 완성된 형태로 반환하세요.\n"
+            "4. 줄 끝에 공백(trailing whitespace)이 없어야 합니다.\n"
             "5. 코드가 중간에 잘리지 않도록 전체 파일을 완성하세요.\n"
         )
+
+    def _collect_header_contents(self, header_exts: frozenset[str]) -> str:
+        """워크스페이스의 헤더 파일 전체 내용을 수집한다."""
+        result = []
+        try:
+            ws = self._fs.get_absolute_path(".")
+            import os
+            from pathlib import Path
+            for p in sorted(Path(ws).rglob("*")):
+                if (p.suffix.lower() in header_exts
+                        and ".harness_backups" not in str(p)
+                        and ".build" not in str(p)):
+                    rel = os.path.relpath(str(p), ws)
+                    try:
+                        text = p.read_text(encoding="utf-8")
+                        result.append(f"--- [{rel}] ---\n{text}")
+                    except OSError:
+                        pass
+        except Exception:  # noqa: BLE001
+            pass
+        return "\n".join(result)
 
     @staticmethod
     def _build_memory_summary(completed_files: list[str]) -> str:

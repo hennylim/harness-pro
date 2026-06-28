@@ -50,5 +50,10 @@ class CppProfile(ILanguageProfile):
         return ".cpp / .hpp"
 
     @property
+    def header_extensions(self) -> frozenset[str]:
+        """헤더 파일은 전체 내용을 skeleton에 포함."""
+        return frozenset({".h", ".hpp"})
+
+    @property
     def requires_compilation(self) -> bool:
         return True
