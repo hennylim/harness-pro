@@ -151,3 +151,65 @@ class IExecutionValidator(ABC):
         -------
         ExecutionResult
         """
+
+
+class IAdaptivePlanner(ABC):
+    """
+    Port for adaptive planning.
+
+    요구사항을 분석해 파일 복잡도를 예측하고,
+    큰 파일은 자동으로 섹션으로 분할하는 강화 플래너.
+    """
+
+    @abstractmethod
+    def generate_enhanced_plan(
+        self,
+        requirements: str,
+        chunk_threshold_lines: int,
+    ) -> "EnhancedProjectPlan":
+        """
+        요구사항을 분석해 EnhancedProjectPlan 을 생성한다.
+
+        복잡한 파일은 자동으로 ChunkedTask 로 분류한다.
+
+        Parameters
+        ----------
+        requirements:
+            사용자 요구사항 자유 형식 문자열.
+        chunk_threshold_lines:
+            이 줄 수 이상으로 예상되는 파일은 청크 분할 대상.
+        """
+
+    @abstractmethod
+    def generate_section(
+        self,
+        file_path: str,
+        section: "FileSection",
+        previous_sections: list["FileSection"],
+        workspace_skeleton: str,
+        error_feedback: str,
+        language_name: str,
+    ) -> str:
+        """
+        청크 분할된 파일의 한 섹션을 생성한다.
+
+        Parameters
+        ----------
+        file_path:
+            대상 파일 경로.
+        section:
+            생성할 섹션 정보.
+        previous_sections:
+            이미 생성된 이전 섹션들 (컨텍스트 유지용).
+        workspace_skeleton:
+            현재 워크스페이스 파일 구조.
+        error_feedback:
+            이전 시도에서의 에러 피드백.
+        language_name:
+            대상 언어 이름.
+
+        Returns
+        -------
+        str
+            생성된 섹션 코드.
+        """

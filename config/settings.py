@@ -88,6 +88,12 @@ class Settings(BaseSettings):
     max_self_heal_attempts: int = Field(default=3, ge=1, le=10)
     max_tasks_per_run: int = Field(default=50, ge=1)
 
+    # ── Adaptive chunking ────────────────────────────────────────────────────
+    # 이 줄 수 이상으로 예상되는 파일은 섹션별 분할 생성
+    chunk_threshold_lines: int = Field(default=80, ge=20, le=500)
+    # 빌드 실패 시 자동 수정 재시도 횟수
+    build_fix_retries: int = Field(default=2, ge=0, le=5)
+
     # ── Build & execution validation ─────────────────────────────────────────
     # 모든 태스크 완료 후 빌드 및 실행 검증을 수행하는 옵션
     enable_build_validation: bool = True    # 빌드(컴파일/문법검사) 수행
