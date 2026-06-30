@@ -33,7 +33,16 @@ class CppProfile(ILanguageProfile):
             "Use nullptr instead of NULL or 0 for pointers.\n"
             "Add Doxygen \\brief comments above each class and public method.\n"
             "Lines ≤ 99 characters.\n"
-            "Do NOT use raw arrays where std::array or std::vector suffice."
+            "Do NOT use raw arrays where std::array or std::vector suffice.\n"
+            "ONLY use C++ standard library headers (iostream, vector, string, "
+            "memory, map, algorithm, fstream, sstream, thread, mutex, chrono, "
+            "stdexcept, etc.) and POSIX headers (unistd.h, sys/socket.h, "
+            "netinet/in.h, arpa/inet.h) when needed for networking.\n"
+            "NEVER include third-party library headers requiring separate "
+            "package installation (e.g. curl/curl.h, openssl/*.h, "
+            "nlohmann/json.hpp, boost/*). If HTTP/JSON/SSL functionality is "
+            "needed, implement it manually using POSIX sockets, since the "
+            "build environment has no external libraries installed."
         )
 
     @property

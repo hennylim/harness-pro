@@ -188,14 +188,12 @@ class TestAdaptivePlanner:
 
     def test_generate_section_passes_previous_context_to_llm(self):
         """generate_section 이 이전 섹션 코드를 user 프롬프트에 포함하는지 확인."""
-        llm = MagicMock()
 
-        # GeminiAdapter 처럼 동작하는 mock
+        # ILLMAdapter.generate_raw 를 구현하는 fake 어댑터
         class FakeLLM:
-            _code_max_tokens = 8192
             calls = []
 
-            def _call(self, system, user, max_tokens):
+            def generate_raw(self, system, user, max_tokens=None):
                 self.calls.append(user)
                 return json.dumps({"section_code": "int result = 42;\n"})
 
@@ -212,25 +210,105 @@ class TestAdaptivePlanner:
             description="main function",
         )
 
-        # GeminiAdapter 로 패칭
-        from agent.infrastructure.llm.gemini_adapter import GeminiAdapter
-        with patch(
-            "agent.usecase.adaptive_planner.isinstance",
-            side_effect=lambda obj, cls: cls == GeminiAdapter,
-        ):
-            code = planner.generate_section(
-                file_path="src/main.c",
-                section=current,
-                previous_sections=[prev],
-                workspace_skeleton="",
-                error_feedback="",
-                language_name="C",
-            )
+        code = planner.generate_section(
+            file_path="src/main.c",
+            section=current,
+            previous_sections=[prev],
+            workspace_skeleton="",
+            error_feedback="",
+            language_name="C",
+        )
 
         assert code.strip() == "int result = 42;"
         # 이전 섹션이 user 프롬프트에 포함됐는지
         assert len(fake_llm.calls) == 1
         assert "#include <stdio.h>" in fake_llm.calls[0]
+
+
+class TestMarkdownFenceRegression:
+    """
+    회귀 테스트: gemini-3.1-flash-lite 같은 경량 모델이
+    response_mime_type=application/json 설정에도 markdown 코드 펜스로
+    응답하는 경우 강화 계획/섹션 생성이 정상 동작하는지 검증.
+
+    원본 버그: ```json ... ``` 로 감싸진 응답을 json.loads() 가
+    파싱하지 못해 매번 enhanced_failed_fallback 으로 떨어졌음.
+    """
+
+    def test_strip_markdown_fence_helper(self):
+        from agent.usecase.adaptive_planner import _strip_markdown_fence
+
+        fenced = '```json\n{"a": 1}\n```'
+        assert _strip_markdown_fence(fenced) == '{"a": 1}'
+
+    def test_strip_markdown_fence_no_lang_tag(self):
+        from agent.usecase.adaptive_planner import _strip_markdown_fence
+
+        fenced = '```\n{"a": 1}\n```'
+        assert _strip_markdown_fence(fenced) == '{"a": 1}'
+
+    def test_strip_markdown_fence_passthrough_raw_json(self):
+        from agent.usecase.adaptive_planner import _strip_markdown_fence
+
+        raw = '{"a": 1}'
+        assert _strip_markdown_fence(raw) == raw
+
+    def test_enhanced_plan_parses_fenced_response(self):
+        """강화 계획 생성이 markdown fence 응답을 정상 파싱하는지."""
+
+        class FakeLLM:
+            def generate_raw(self, system, user, max_tokens=None):
+                return (
+                    '```json\n'
+                    '{"files": [{"task_id": 1, "file_path": "src/a.c", '
+                    '"action": "create", "description": "x", '
+                    '"estimated_lines": 20, "complexity": "simple", '
+                    '"sections": []}]}\n'
+                    '```'
+                )
+
+        planner = AdaptivePlanner(llm_adapter=FakeLLM(), chunk_threshold_lines=80)
+        plan = planner.generate_enhanced_plan("test", 80)
+
+        assert len(plan.tasks) == 1
+        assert plan.tasks[0].file_path == "src/a.c"
+
+    def test_section_generation_parses_fenced_response(self):
+        """섹션 생성이 markdown fence 응답을 정상 파싱하는지."""
+
+        class FakeLLM:
+            def generate_raw(self, system, user, max_tokens=None):
+                return '```json\n{"section_code": "int x = 1;\\n"}\n```'
+
+        planner = AdaptivePlanner(llm_adapter=FakeLLM(), chunk_threshold_lines=80)
+        section = _make_section(0, "test_section")
+
+        code = planner.generate_section(
+            file_path="src/a.c",
+            section=section,
+            previous_sections=[],
+            workspace_skeleton="",
+            error_feedback="",
+            language_name="C",
+        )
+        assert code.strip() == "int x = 1;"
+
+    def test_enhanced_plan_unfenced_still_works(self):
+        """fence 없는 정상 JSON 도 계속 동작 (하위 호환)."""
+
+        class FakeLLM:
+            def generate_raw(self, system, user, max_tokens=None):
+                return (
+                    '{"files": [{"task_id": 1, "file_path": "src/b.c", '
+                    '"action": "create", "description": "x", '
+                    '"estimated_lines": 20, "complexity": "simple", '
+                    '"sections": []}]}'
+                )
+
+        planner = AdaptivePlanner(llm_adapter=FakeLLM(), chunk_threshold_lines=80)
+        plan = planner.generate_enhanced_plan("test", 80)
+        assert len(plan.tasks) == 1
+        assert plan.tasks[0].file_path == "src/b.c"
 
 
 # ── HarnessOrchestrator + 청크 모드 ─────────────────────────────────────────

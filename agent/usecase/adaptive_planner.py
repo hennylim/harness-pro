@@ -20,6 +20,7 @@ adaptive_planner.py – 파일 복잡도를 예측해 큰 파일을 섹션으로
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 import structlog
@@ -45,7 +46,7 @@ _ENHANCED_PLAN_SYSTEM = """You are an expert software architect specializing in 
 planning code generation for small LLMs.
 
 Analyze the requirements and produce a detailed JSON plan.
-Return ONLY a valid JSON object with NO markdown, NO commentary:
+Return ONLY a valid JSON object. Do NOT wrap it in markdown code fences (no ```json). No commentary before or after:
 {{
   "files": [
     {{
@@ -90,7 +91,7 @@ a larger source file.
 CRITICAL: You are generating ONLY the section described below.
 The surrounding context (previous sections) is provided for reference.
 
-Return ONLY a JSON object:
+Return ONLY a JSON object. Do NOT wrap it in markdown code fences (no ```json):
 {{
   "section_code": "<complete code for THIS section only>"
 }}
@@ -104,6 +105,21 @@ Rules:
 6. No trailing whitespace on any line.
 7. section_code must be syntactically complete (no dangling brackets/quotes).
 """
+
+
+def _strip_markdown_fence(text: str) -> str:
+    """
+    ```json ... ``` 또는 ``` ... ``` 로 감싸진 응답에서 내부 JSON/코드만 추출한다.
+
+    일부 경량 LLM(특히 *-flash-lite 계열)은 response_mime_type=application/json
+    을 설정해도 markdown 코드 펜스를 포함해서 응답하는 경우가 있다.
+    이 함수가 없으면 json.loads() 가 항상 실패해 강화 계획이 매번 폴백된다.
+    """
+    stripped = text.strip()
+    match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```$", stripped, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return stripped
 
 
 class AdaptivePlanner(IAdaptivePlanner):
@@ -151,9 +167,10 @@ class AdaptivePlanner(IAdaptivePlanner):
         user = f"Requirements:\n{requirements}"
 
         raw = self._call_llm_plan(system, user)
+        raw_cleaned = _strip_markdown_fence(raw)
 
         try:
-            data = json.loads(raw)
+            data = json.loads(raw_cleaned)
         except json.JSONDecodeError as exc:
             raise LLMParseError(
                 f"강화 계획 JSON 파싱 실패: {exc}\nRaw:\n{raw[:500]}"
@@ -286,9 +303,10 @@ class AdaptivePlanner(IAdaptivePlanner):
         )
 
         raw = self._call_llm_section("\n".join(user_parts))
+        raw_cleaned = _strip_markdown_fence(raw)
 
         try:
-            data = json.loads(raw)
+            data = json.loads(raw_cleaned)
             code = data.get("section_code", "")
         except json.JSONDecodeError:
             # 복구 시도: JSON 아닌 순수 코드로 반환된 경우
@@ -296,7 +314,8 @@ class AdaptivePlanner(IAdaptivePlanner):
                 recovered = recover_code_patch_json(raw)
                 code = recovered.get("code_block", raw)
             except Exception:
-                code = raw
+                # 최후 수단: markdown fence 만 제거한 raw 텍스트를 코드로 사용
+                code = raw_cleaned if raw_cleaned.strip() else raw
 
         if not code.strip():
             raise LLMParseError(
@@ -308,60 +327,27 @@ class AdaptivePlanner(IAdaptivePlanner):
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _call_llm_plan(self, system: str, user: str) -> str:
-        """LLM 어댑터의 generate_plan 을 직접 호출하되 raw JSON 반환."""
-        # ILLMAdapter.generate_plan 은 ProjectPlan 을 반환하므로
-        # 강화 계획을 위해 내부적으로 generate_code 를 재활용하거나
-        # 어댑터의 내부 _call 메서드를 사용한다.
-        # 여기서는 어댑터 유형에 따라 분기한다.
-        from agent.infrastructure.llm.gemini_adapter import GeminiAdapter
-        from agent.infrastructure.llm.openai_adapter import OpenAICompatibleAdapter
-
-        if isinstance(self._llm, GeminiAdapter):
-            return self._llm._call(
-                system=system,
-                user=user,
-                max_tokens=self._llm._max_tokens,
-            )
-        elif isinstance(self._llm, OpenAICompatibleAdapter):
-            return self._llm._call(system=system, user=user)
-        else:
-            # 폴백: generate_plan 의 결과를 JSON 으로 직렬화
-            plan = self._llm.generate_plan(user)
-            return plan.model_dump_json()
+        """LLM 어댑터의 generate_raw 를 통해 강화 계획 JSON 을 요청한다."""
+        return self._llm.generate_raw(
+            system=system,
+            user=user,
+            max_tokens=self._plan_max_tokens(),
+        )
 
     def _call_llm_section(self, user: str) -> str:
-        """섹션 생성 LLM 호출."""
-        from agent.infrastructure.llm.gemini_adapter import GeminiAdapter
-        from agent.infrastructure.llm.openai_adapter import OpenAICompatibleAdapter
+        """LLM 어댑터의 generate_raw 를 통해 섹션 코드를 요청한다."""
+        return self._llm.generate_raw(
+            system=_SECTION_SYSTEM,
+            user=user,
+            max_tokens=None,  # 어댑터 기본 코드 토큰 사용
+        )
 
-        if isinstance(self._llm, GeminiAdapter):
-            return self._llm._call(
-                system=_SECTION_SYSTEM,
-                user=user,
-                max_tokens=self._llm._code_max_tokens,
-            )
-        elif isinstance(self._llm, OpenAICompatibleAdapter):
-            return self._llm._call(
-                system=_SECTION_SYSTEM,
-                user=user,
-                override_max_tokens=self._llm._code_max_tokens,
-            )
-        else:
-            # 폴백: generate_code 를 흉내 낸 Task 로 호출
-            from agent.domain.entities import Task, TaskAction
-            fake_task = Task(
-                task_id=0,
-                file_path="section",
-                action=TaskAction.CREATE,
-                description=user[:200],
-            )
-            patch = self._llm.generate_code(
-                task=fake_task,
-                memory_summary="",
-                workspace_skeleton="",
-                error_feedback="",
-            )
-            return json.dumps({"section_code": patch.code_block})
+    def _plan_max_tokens(self) -> int | None:
+        """
+        가능하면 어댑터의 plan 토큰 한도를 사용하고,
+        속성이 없는 어댑터(테스트 더블 등)는 None 으로 어댑터 기본값에 위임한다.
+        """
+        return getattr(self._llm, "_max_tokens", None)
 
     @staticmethod
     def _build_previous_context(sections: list[FileSection]) -> str:

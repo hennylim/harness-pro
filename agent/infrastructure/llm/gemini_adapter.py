@@ -188,6 +188,19 @@ class GeminiAdapter(ILLMAdapter):
             max_tokens=512,
         )
 
+    def generate_raw(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int | None = None,
+    ) -> str:
+        """
+        임의의 system/user 프롬프트로 직접 호출한다.
+        AdaptivePlanner 의 강화 계획/섹션 생성에서 사용.
+        """
+        effective_tokens = max_tokens or self._code_max_tokens
+        return self._call(system=system, user=user, max_tokens=effective_tokens)
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _call(self, system: str, user: str, max_tokens: int) -> str:

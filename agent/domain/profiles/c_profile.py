@@ -33,7 +33,18 @@ class CProfile(ILanguageProfile):
             "Add a file-level Doxygen comment block (\\file, \\brief).\n"
             "Add \\brief Doxygen comments above each function declaration.\n"
             "Lines ≤ 79 characters.\n"
-            "Do NOT use deprecated POSIX functions."
+            "Do NOT use deprecated POSIX functions.\n"
+            "ONLY use C standard library headers (stdio.h, stdlib.h, string.h, "
+            "stddef.h, stdint.h, stdbool.h, math.h, time.h, errno.h, ctype.h, "
+            "assert.h, limits.h) and POSIX headers available without extra "
+            "install on a minimal Linux system (unistd.h, sys/socket.h, "
+            "netinet/in.h, arpa/inet.h, pthread.h, sys/types.h, fcntl.h).\n"
+            "NEVER include third-party library headers that require separate "
+            "package installation (e.g. curl/curl.h, openssl/*.h, jansson.h, "
+            "cjson/cJSON.h, sqlite3.h). If HTTP/JSON/SSL functionality is "
+            "needed, implement it manually using POSIX sockets "
+            "(sys/socket.h) and write a minimal hand-rolled parser, "
+            "since the build environment has no external libraries installed."
         )
 
     @property

@@ -43,6 +43,29 @@ class ILLMAdapter(ABC):
     ) -> str:
         """Return a short natural-language summary of what has been built."""
 
+    @abstractmethod
+    def generate_raw(
+        self,
+        system: str,
+        user: str,
+        max_tokens: Optional[int] = None,
+    ) -> str:
+        """
+        임의의 system/user 프롬프트로 LLM 을 직접 호출해 raw 텍스트를 반환한다.
+
+        AdaptivePlanner 같은 상위 유스케이스가 표준 generate_plan/generate_code
+        스키마에 맞지 않는 커스텀 프롬프트(강화 계획, 섹션 생성)를 보낼 때 사용한다.
+
+        Parameters
+        ----------
+        system:
+            System 프롬프트.
+        user:
+            User 프롬프트.
+        max_tokens:
+            None 이면 어댑터의 코드 생성 기본값(보통 가장 큰 토큰 한도)을 사용한다.
+        """
+
 
 class IFileSystemAdapter(ABC):
     """Port for all workspace file-system operations."""

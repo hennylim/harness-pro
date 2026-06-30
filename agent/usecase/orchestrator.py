@@ -234,7 +234,12 @@ class HarnessOrchestrator:
             # 강화 계획 실패 시 일반 계획으로 폴백
             log.warning(
                 "agent.plan.enhanced_failed_fallback",
-                error=str(exc),
+                error_type=type(exc).__name__,
+                error=str(exc)[:500],
+            )
+            log.debug(
+                "agent.plan.enhanced_failed_traceback",
+                traceback=traceback.format_exc(),
             )
             plan = self._fallback_to_normal_plan(requirements)
 
@@ -646,9 +651,13 @@ class HarnessOrchestrator:
         빌드 에러를 분석해 관련 파일을 자동으로 수정 시도.
 
         에러 메시지에서 파일명을 추출하고 해당 파일에 에러 피드백을 줘서 재생성.
+        외부 라이브러리 헤더 누락(fatal error: X.h: No such file) 인 경우
+        해당 라이브러리 의존을 제거하라는 명시적 지침을 추가한다.
         """
         log.info("agent.build.auto_fix", attempt=attempt)
         error_text = "\n".join(build_result.errors)
+
+        missing_header_hint = self._detect_missing_header_hint(error_text)
 
         # 에러에서 파일 경로 추출
         affected_files = self._extract_files_from_errors(error_text, workspace)
@@ -665,10 +674,12 @@ class HarnessOrchestrator:
                 action=TaskAction.MODIFY,
                 description=f"Fix build error in {rel_path}",
             )
-            fix_task.record_retry_error(
+            feedback = (
                 f"빌드 에러 (시도 {attempt}):\n{error_text[:800]}\n\n"
+                + missing_header_hint
                 + self._get_header_context()
             )
+            fix_task.record_retry_error(feedback)
 
             fix_log = log.bind(file=rel_path, mode="build_fix")
             if self._run_task_with_healing(fix_task, [], fix_log):
@@ -678,6 +689,36 @@ class HarnessOrchestrator:
                 log.warning("agent.build.fix_file.failed", file=rel_path)
 
         return fixed_any
+
+    @staticmethod
+    def _detect_missing_header_hint(error_text: str) -> str:
+        """
+        'fatal error: X.h: No such file or directory' (또는 한글 메시지)
+        패턴을 감지해 외부 라이브러리 의존 제거 지침을 생성한다.
+        """
+        import re
+
+        pattern = re.compile(
+            r"fatal error:\s*([\w./]+\.(?:h|hpp)):\s*"
+            r"(?:No such file or directory|그런 파일이나 디렉터리가 없습니다)"
+        )
+        missing = pattern.findall(error_text)
+        if not missing:
+            return ""
+
+        headers_list = ", ".join(sorted(set(missing)))
+        return (
+            f"\n⚠️  치명적 빌드 오류: 다음 헤더 파일을 찾을 수 없습니다: "
+            f"{headers_list}\n"
+            "이 빌드 환경에는 서드파티 라이브러리(curl, openssl, json-c 등)가 "
+            "설치되어 있지 않습니다.\n"
+            "수정 방법:\n"
+            f"1. {headers_list} 를 #include 하지 마세요.\n"
+            "2. 표준 C/C++ 라이브러리와 POSIX 헤더(sys/socket.h, "
+            "netinet/in.h, arpa/inet.h, unistd.h)만 사용하세요.\n"
+            "3. HTTP 통신이 필요하면 POSIX 소켓으로 직접 구현하세요.\n"
+            "4. JSON 파싱이 필요하면 간단한 수동 파서를 직접 작성하세요.\n\n"
+        )
 
     def _try_fix_exec_error(
         self,
