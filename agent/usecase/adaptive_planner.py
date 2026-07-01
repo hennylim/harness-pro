@@ -98,12 +98,14 @@ Return ONLY a JSON object. Do NOT wrap it in markdown code fences (no ```json):
 
 Rules:
 1. section_code must be COMPLETE and COMPILABLE for the described section.
-2. Do NOT repeat code from previous sections.
-3. Do NOT add file headers/includes that belong to other sections.
-4. section_code ends with a newline character.
-5. Escape double-quotes as \\".
-6. No trailing whitespace on any line.
-7. section_code must be syntactically complete (no dangling brackets/quotes).
+2. Begin section_code with a comment outline describing each function or missing part that will be implemented.
+3. Then generate the complete code below that comment outline.
+4. Do NOT repeat code from previous sections.
+5. Do NOT add file headers/includes that belong to other sections.
+6. section_code ends with a newline character.
+7. Escape double-quotes as \".
+8. No trailing whitespace on any line.
+9. section_code must be syntactically complete (no dangling brackets/quotes).
 """
 
 
@@ -265,6 +267,7 @@ class AdaptivePlanner(IAdaptivePlanner):
         workspace_skeleton: str,
         error_feedback: str,
         language_name: str,
+        section_overview: str = "",
         repo_context: str = "",
     ) -> str:
         """
@@ -293,6 +296,11 @@ class AdaptivePlanner(IAdaptivePlanner):
                 f"{prev_context}\n"
                 "=== End of previous sections ==="
             )
+        if section_overview:
+            user_parts.append(
+                f"\n=== Section overview for this file ===\n{section_overview}\n"
+                "=== End section overview ==="
+            )
         if repo_context:
             user_parts.append(f"\n=== Repository context ===\n{repo_context}")
         if workspace_skeleton:
@@ -306,6 +314,8 @@ class AdaptivePlanner(IAdaptivePlanner):
             )
 
         user_parts.append(
+            f"\nFirst write a comment outline for this section, listing each function or missing part that should be implemented."
+            " Then write the complete section code below the comment outline."
             f"\nNow write ONLY the '{section.section_name}' section code."
         )
 

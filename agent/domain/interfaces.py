@@ -214,6 +214,7 @@ class IAdaptivePlanner(ABC):
         workspace_skeleton: str,
         error_feedback: str,
         language_name: str,
+        section_overview: str = "",
         repo_context: str = "",
     ) -> str:
         """

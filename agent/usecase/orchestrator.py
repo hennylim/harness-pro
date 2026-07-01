@@ -419,6 +419,8 @@ class HarnessOrchestrator:
         """
         self._fs.backup_file(ct.file_path)
 
+        section_overview = self._build_chunked_file_outline(ct.sections)
+
         for section in ct.sections:
             s_log = ct_log.bind(
                 section=section.section_name,
@@ -438,6 +440,7 @@ class HarnessOrchestrator:
                 section=section,
                 prev_sections=prev_sections,
                 completed_files=completed_files,
+                section_overview=section_overview,
                 repo_context=self._repo_context,
                 s_log=s_log,
             )
@@ -460,6 +463,7 @@ class HarnessOrchestrator:
         section: FileSection,
         prev_sections: list[FileSection],
         completed_files: list[str],
+        section_overview: str,
         repo_context: str,
         s_log,
     ) -> bool:
@@ -481,6 +485,7 @@ class HarnessOrchestrator:
                     workspace_skeleton=skeleton,
                     error_feedback=error_feedback,
                     language_name=lang_name,
+                    section_overview=section_overview,
                     repo_context=repo_context,
                 )
             except (LLMError, LLMParseError) as exc:
@@ -773,6 +778,21 @@ class HarnessOrchestrator:
                 else None
             ),
         )
+
+    @staticmethod
+    def _build_chunked_file_outline(sections: list[FileSection]) -> str:
+        if not sections:
+            return ""
+        lines = [
+            "File outline for chunked generation:",
+        ]
+        for section in sections:
+            lines.append(
+                f"- Section {section.section_index}: {section.section_name}"
+            )
+            if section.description:
+                lines.append(f"  Description: {section.description}")
+        return "\n".join(lines)
 
     def _build_error_feedback(self, task: Task) -> str:
         if not task.error_history:
