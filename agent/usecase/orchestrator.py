@@ -124,6 +124,7 @@ class HarnessOrchestrator:
         enable_build_validation: bool = True,
         enable_execution_validation: bool = True,
         build_fix_retries: int = DEFAULT_BUILD_FIX_RETRIES,
+        repo_context: str = "",
     ) -> None:
         self._llm = llm
         self._fs = fs
@@ -141,6 +142,7 @@ class HarnessOrchestrator:
         self._enable_build = enable_build_validation
         self._enable_exec = enable_execution_validation
         self._build_fix_retries = build_fix_retries
+        self._repo_context = repo_context
 
         # 적응형 플래너 (청크 분할 전담)
         self._planner = AdaptivePlanner(
@@ -229,6 +231,7 @@ class HarnessOrchestrator:
             plan = self._planner.generate_enhanced_plan(
                 requirements=requirements,
                 chunk_threshold_lines=self._chunk_threshold,
+                repo_context=self._repo_context,
             )
         except Exception as exc:
             # 강화 계획 실패 시 일반 계획으로 폴백
@@ -276,7 +279,9 @@ class HarnessOrchestrator:
         """강화 계획 실패 시 일반 LLM 플래너로 폴백."""
         log.info("agent.plan.fallback_normal")
         try:
-            normal_plan = self._llm.generate_plan(requirements)
+            normal_plan = self._llm.generate_plan(
+                requirements, repo_context=self._repo_context
+            )
         except LLMError as exc:
             raise PlanValidationError(
                 f"LLM 계획 생성 실패: {exc}"
@@ -329,6 +334,7 @@ class HarnessOrchestrator:
                     memory_summary=self._build_memory_summary(completed_files),
                     workspace_skeleton=skeleton,
                     error_feedback=self._build_error_feedback(task),
+                    repo_context=self._repo_context,
                 )
             except LLMError as exc:
                 task.record_retry_error(f"LLM 생성 오류: {exc}")
@@ -432,6 +438,7 @@ class HarnessOrchestrator:
                 section=section,
                 prev_sections=prev_sections,
                 completed_files=completed_files,
+                repo_context=self._repo_context,
                 s_log=s_log,
             )
 
@@ -453,6 +460,7 @@ class HarnessOrchestrator:
         section: FileSection,
         prev_sections: list[FileSection],
         completed_files: list[str],
+        repo_context: str,
         s_log,
     ) -> bool:
         """섹션 생성 with self-heal 재시도."""
@@ -473,6 +481,7 @@ class HarnessOrchestrator:
                     workspace_skeleton=skeleton,
                     error_feedback=error_feedback,
                     language_name=lang_name,
+                    repo_context=repo_context,
                 )
             except (LLMError, LLMParseError) as exc:
                 error_feedback = f"생성 오류: {exc}"

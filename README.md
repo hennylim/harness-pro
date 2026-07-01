@@ -126,6 +126,13 @@ python main.py --language cpp --workspace ./my_project
 # 대상 언어
 TARGET_LANGUAGE=python    # python | bash | c | cpp
 
+# Git repository 입력 (선택 사항)
+# Git repo URL을 줄바꿈, 쉼표 또는 세미콜론으로 구분해 입력합니다.
+# 지정된 repo는 WORKSPACE_DIR/repositories 아래에 복제됩니다.
+# 분석 결과는 WORKSPACE_DIR/.repo_analysis 에 저장됩니다.
+# GIT_REPOSITORY_URLS=https://github.com/example/repo1.git
+# GIT_REPOSITORY_URLS=https://github.com/example/repo1.git;https://github.com/example/repo2.git
+
 # LLM 제공자
 AI_PROVIDER=OLLAMA        # OLLAMA | OPENAI | ANTHROPIC | AZURE | GEMINI
 AI_MODEL=qwen2.5-coder:7b

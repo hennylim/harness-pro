@@ -153,6 +153,7 @@ class AdaptivePlanner(IAdaptivePlanner):
         self,
         requirements: str,
         chunk_threshold_lines: int,
+        repo_context: str = "",
     ) -> EnhancedProjectPlan:
         """
         요구사항 → 세분화된 계획 생성.
@@ -164,7 +165,10 @@ class AdaptivePlanner(IAdaptivePlanner):
         system = _ENHANCED_PLAN_SYSTEM.format(
             threshold=chunk_threshold_lines
         )
-        user = f"Requirements:\n{requirements}"
+        user = (
+            f"Repository context:\n{repo_context}\n\nRequirements:\n{requirements}"
+            if repo_context else f"Requirements:\n{requirements}"
+        )
 
         raw = self._call_llm_plan(system, user)
         raw_cleaned = _strip_markdown_fence(raw)
@@ -261,6 +265,7 @@ class AdaptivePlanner(IAdaptivePlanner):
         workspace_skeleton: str,
         error_feedback: str,
         language_name: str,
+        repo_context: str = "",
     ) -> str:
         """
         청크 파일의 한 섹션을 생성한다.
@@ -288,6 +293,8 @@ class AdaptivePlanner(IAdaptivePlanner):
                 f"{prev_context}\n"
                 "=== End of previous sections ==="
             )
+        if repo_context:
+            user_parts.append(f"\n=== Repository context ===\n{repo_context}")
         if workspace_skeleton:
             user_parts.append(
                 f"\n=== Workspace context ===\n{workspace_skeleton}\n"

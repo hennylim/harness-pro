@@ -2,6 +2,7 @@
 Application configuration via environment variables.
 All settings are validated at startup; missing required values fail fast.
 """
+import re
 from enum import Enum
 from typing import Optional
 from pydantic import Field, field_validator
@@ -85,6 +86,9 @@ class Settings(BaseSettings):
     # ── Agent behaviour ───────────────────────────────────────────────────────
     dry_run: bool = True
     workspace_dir: str = "./sandbox_workspace"
+    git_repository_urls: Optional[str] = None
+    git_repositories_dir: str = "repositories"
+    repo_analysis_dir: str = ".repo_analysis"
     max_self_heal_attempts: int = Field(default=3, ge=1, le=10)
     max_tasks_per_run: int = Field(default=50, ge=1)
 
@@ -147,6 +151,16 @@ class Settings(BaseSettings):
                 "Google AI Studio API 키를 설정해야 합니다."
             )
         return key
+
+    @property
+    def git_repository_list(self) -> list[str]:
+        if not self.git_repository_urls:
+            return []
+        return [
+            url.strip()
+            for url in re.split(r"[\n,;]+", self.git_repository_urls)
+            if url.strip()
+        ]
 
 
 settings = Settings()

@@ -17,6 +17,7 @@ import structlog
 
 from agent.domain.interfaces import ILLMAdapter, INotificationAdapter
 from agent.domain.profiles import PROFILE_REGISTRY
+from agent.infrastructure.fs.git_repository_manager import GitRepositoryManager
 from agent.infrastructure.fs.local_adapter import LocalFileSystemAdapter
 from agent.infrastructure.fs.run_repository import JsonRunRepository
 from agent.infrastructure.llm.gemini_adapter import GeminiAdapter
@@ -105,6 +106,17 @@ def build_orchestrator(
     sensor = LanguageSensorRouter()
     run_repo = JsonRunRepository(runs_dir=runs_dir)
 
+    repo_context = ""
+    if settings.git_repository_list:
+        repo_manager = GitRepositoryManager(
+            workspace_dir=ws,
+            repo_urls=settings.git_repository_list,
+            repos_dir=settings.git_repositories_dir,
+            analysis_dir=settings.repo_analysis_dir,
+        )
+        repo_manager.prepare_repositories()
+        repo_context = repo_manager.get_repo_analysis_summary()
+
     post_processor = CodePostProcessor(
         fix_trailing_whitespace=settings.post_process_trailing_whitespace,
         fix_unused_imports=settings.post_process_unused_imports,
@@ -140,6 +152,7 @@ def build_orchestrator(
         enable_build_validation=settings.enable_build_validation,
         enable_execution_validation=settings.enable_execution_validation,
         build_fix_retries=settings.build_fix_retries,
+        repo_context=repo_context,
     )
 
     log.info(

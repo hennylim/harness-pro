@@ -22,7 +22,7 @@ class ILLMAdapter(ABC):
     """Port for all large-language-model interactions."""
 
     @abstractmethod
-    def generate_plan(self, requirements: str) -> ProjectPlan:
+    def generate_plan(self, requirements: str, repo_context: str = "") -> ProjectPlan:
         """Convert a free-text requirements string into an ordered task plan."""
 
     @abstractmethod
@@ -32,6 +32,7 @@ class ILLMAdapter(ABC):
         memory_summary: str,
         workspace_skeleton: str,
         error_feedback: str,
+        repo_context: str = "",
     ) -> CodePatch:
         """Generate (or regenerate) source code for a single task."""
 
@@ -189,6 +190,7 @@ class IAdaptivePlanner(ABC):
         self,
         requirements: str,
         chunk_threshold_lines: int,
+        repo_context: str = "",
     ) -> "EnhancedProjectPlan":
         """
         요구사항을 분석해 EnhancedProjectPlan 을 생성한다.
@@ -212,6 +214,7 @@ class IAdaptivePlanner(ABC):
         workspace_skeleton: str,
         error_feedback: str,
         language_name: str,
+        repo_context: str = "",
     ) -> str:
         """
         청크 분할된 파일의 한 섹션을 생성한다.

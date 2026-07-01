@@ -154,11 +154,15 @@ class OpenAICompatibleAdapter(ILLMAdapter):
 
     # ── ILLMAdapter ───────────────────────────────────────────────────────────
 
-    def generate_plan(self, requirements: str) -> ProjectPlan:
+    def generate_plan(self, requirements: str, repo_context: str = "") -> ProjectPlan:
         log.info("llm.plan.request", model=self._model)
+        user = (
+            f"Repository context:\n{repo_context}\n\nRequirements:\n{requirements}"
+            if repo_context else f"Requirements:\n{requirements}"
+        )
         raw = self._call(
             system=self._prompts.build_plan_system(),
-            user=f"Requirements:\n{requirements}",
+            user=user,
         )
         try:
             plan = ProjectPlan(**json.loads(raw))
@@ -175,12 +179,15 @@ class OpenAICompatibleAdapter(ILLMAdapter):
         memory_summary: str,
         workspace_skeleton: str,
         error_feedback: str,
+        repo_context: str = "",
     ) -> CodePatch:
         log.info("llm.code.request", file=task.file_path, retry=task.retry_count)
         parts = [
             f"Task: [{task.action.value}] {task.file_path}",
             f"Description: {task.description}",
         ]
+        if repo_context:
+            parts.append(f"\nRepository context:\n{repo_context}")
         if memory_summary:
             parts.append(f"\nAlready completed files:\n{memory_summary}")
         if workspace_skeleton:
