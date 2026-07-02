@@ -10,10 +10,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable
 
 from agent.domain.exceptions import FileSystemError
 
@@ -72,15 +71,15 @@ class GitRepositoryManager:
     def _prepare_repository(self, repo_url: str) -> None:
         repo_name = self._normalize_repo_name(repo_url)
         repo_path = os.path.join(self._repos_root, repo_name)
+        worktree_path = os.path.join(self._repos_root, f"{repo_name}-worktree")
 
         if not os.path.isdir(os.path.join(repo_path, ".git")):
             self._git_clone(repo_url, repo_path)
         else:
             self._git_fetch(repo_path)
-            if not self._git_has_local_changes(repo_path):
-                self._git_pull(repo_path)
 
-        summary = self._analyze_repository(repo_url, repo_name, repo_path)
+        self._ensure_worktree(repo_path, worktree_path)
+        summary = self._analyze_repository(repo_url, repo_name, worktree_path)
         self._summaries.append(summary)
 
     def _normalize_repo_name(self, repo_url: str) -> str:
@@ -120,29 +119,6 @@ class GitRepositoryManager:
             raise RuntimeError(
                 f"git fetch failed: {exc.stderr.strip() or exc.stdout.strip()}"
             ) from exc
-
-    def _git_pull(self, repo_path: str) -> None:
-        try:
-            subprocess.run(
-                ["git", "pull", "--ff-only"],
-                cwd=repo_path,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError:
-            # Leave local modifications untouched if fast-forward is unavailable.
-            return
-
-    def _git_has_local_changes(self, repo_path: str) -> bool:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return bool(result.stdout.strip())
 
     def _git_current_commit(self, repo_path: str) -> str | None:
         try:
@@ -184,6 +160,8 @@ class GitRepositoryManager:
         for root, dirs, files in os.walk(repo_path):
             dirs[:] = [d for d in dirs if d != ".git" and d != "__pycache__"]
             for filename in sorted(files):
+                if filename == ".git":
+                    continue
                 abs_path = os.path.join(root, filename)
                 rel_path = os.path.relpath(abs_path, repo_path)
                 try:
@@ -199,6 +177,9 @@ class GitRepositoryManager:
         current_hashes: dict[str, str],
         previous_hashes: dict[str, str],
     ) -> list[str]:
+        if not previous_hashes:
+            return []
+
         changed: list[str] = []
         for path, checksum in current_hashes.items():
             if previous_hashes.get(path) != checksum:
@@ -230,3 +211,63 @@ class GitRepositoryManager:
                 json.dump(summary, fh, ensure_ascii=False, indent=2)
         except OSError as exc:
             raise FileSystemError(f"Unable to write analysis state: {exc}") from exc
+
+    def _ensure_worktree(self, repo_path: str, worktree_path: str) -> None:
+        worktree_exists = os.path.exists(worktree_path)
+        if worktree_exists:
+            self._remove_worktree(repo_path, worktree_path)
+
+        target_ref = self._git_worktree_target_ref(repo_path)
+        self._git_worktree_add(repo_path, worktree_path, target_ref)
+
+    def _remove_worktree(self, repo_path: str, worktree_path: str) -> None:
+        try:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", worktree_path],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError:
+            if os.path.isdir(worktree_path):
+                shutil.rmtree(worktree_path)
+            elif os.path.exists(worktree_path):
+                os.remove(worktree_path)
+
+    def _git_worktree_target_ref(self, repo_path: str) -> str:
+        try:
+            result = subprocess.run(
+                ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError:
+            try:
+                result = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=repo_path,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                return result.stdout.strip()
+            except subprocess.CalledProcessError:
+                return "HEAD"
+
+    def _git_worktree_add(self, repo_path: str, worktree_path: str, target_ref: str) -> None:
+        try:
+            subprocess.run(
+                ["git", "worktree", "add", "--force", worktree_path, target_ref],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"git worktree add failed: {exc.stderr.strip() or exc.stdout.strip()}"
+            ) from exc
